@@ -32,6 +32,7 @@ jobs:
         run: pip install -r ./Spider/requirements.txt
       - name: 'Working'
         run: |
+          sudo rm -fr /usr/bin/chromedriver
           sudo cp -p ./chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
           python ./Spider/test.py
