@@ -10,6 +10,6 @@ chrome_options.add_argument('--disable-dev-shm-usage')
 chromedriver = "/usr/bin/chromedriver"
 os.environ["webdriver.chrome.driver"] = chromedriver
 driver = webdriver.Chrome(chrome_options=chrome_options,executable_path=chromedriver)
-driver.get("https://shilong.js.org")
+driver.get("https://www.google.com/")
 print(driver.title)
 driver.quit()
