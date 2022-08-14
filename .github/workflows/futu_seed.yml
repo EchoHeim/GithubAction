@@ -35,4 +35,3 @@ jobs:
           sudo cp -p ./chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
           python ./Spider/test.py
-         
