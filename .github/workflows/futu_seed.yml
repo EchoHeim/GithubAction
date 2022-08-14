@@ -1,4 +1,4 @@
-name: selenium
+name: futu_seed
 
 # Controls when the action will run. 
 on:
@@ -29,10 +29,10 @@ jobs:
         with:
            python-version: 3.7
       - name: 'Install requirements'
-        run: pip install -r ./Spider/requirements.txt
+        run: pip install -r ./selenium/Spider/requirements.txt
       - name: 'Working'
         run: |
           sudo rm -fr /usr/bin/chromedriver
-          sudo cp -p ./chrome/chromedriver /usr/bin/
+          sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
-          python ./Spider/test.py
+          python ./selenium/Spider/futu_seed.py
