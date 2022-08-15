@@ -27,12 +27,12 @@ jobs:
       - name: 'Set up Python'
         uses: actions/setup-python@v1
         with:
-           python-version: 3.7
+           python-version: 3.10.6
       - name: 'Install requirements'
-        run: pip install -r ./selenium/Spider/requirements.txt
+        run: pip install -r ./futu/requirements.txt
       - name: 'Working'
         run: |
           sudo rm -fr /usr/bin/chromedriver
           sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
-          python ./selenium/Spider/futu_seed.py
+          python ./selenium/futu/futu_seed.py
