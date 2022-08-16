@@ -45,7 +45,9 @@ browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/ul/li[2]/input')
 browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/ul/li[3]/input').send_keys(password)            # 输入密码
 browser.find_element(By.XPATH,'/html/body/div[1]/div[2]/div[4]/form/ul/li[5]/div[1]/label/span').click()        # 勾选协议
 browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/input[4]').click()        # 点击登录
-time.sleep(2)
+time.sleep(20)
+
+print(browser.title)
 
 browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()      # 浇水
 time.sleep(1)
