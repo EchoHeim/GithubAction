@@ -3,8 +3,6 @@ from selenium.webdriver.chrome.options import Options
 
 import platform
 
-import cv2, numpy as np
-
 import os, sys, time
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
@@ -15,11 +13,12 @@ from selenium.webdriver.support import expected_conditions as EC
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
-print (username)
-print (password)
 
 # username = 16065581     # 登录账号
 # password = 'china1995?!.' # 登录密码
+
+print (username)
+print (password)
 
 # 富途牛牛 种子农场 登录地址
 website='https://passport.futunn.com/?target=https%3A%2F%2Fseed.futunn.com%2F%3Flang%3Dzh-cn%26panel%3Dcultureroom#login'
