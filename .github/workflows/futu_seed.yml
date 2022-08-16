@@ -1,4 +1,4 @@
-name: futu_seed
+name: Futu_Seed_Farms
 
 # Controls when the action will run. 
 on:
@@ -30,12 +30,12 @@ jobs:
       - name: 'Set up Python'
         uses: actions/setup-python@v1
         with:
-           python-version: 3.7
+          python-version: 3.7
       - name: 'Install requirements'
-        run: pip install -r ./futu/requirements.txt
+        run: pip install -r ./selenium/futu/requirements.txt
       - name: 'Working'
         run: |
           sudo rm -fr /usr/bin/chromedriver
           sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
-          python ./futu/futu_seed.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
+          python ./selenium/Futu/SeedFarm.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
