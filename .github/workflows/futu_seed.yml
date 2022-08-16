@@ -35,4 +35,4 @@ jobs:
           sudo rm -fr /usr/bin/chromedriver
           sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
-          python ./futu/futu_seed.py
+          python ./futu/futu_seed.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
