@@ -37,7 +37,7 @@ elif platform.system() == 'Linux':
     browser = webdriver.Chrome(chrome_options=chrome_options,executable_path=chromedriver)
 
 browser.get(website)
-time.sleep(1)
+time.sleep(2)
 print(browser.title)
 
 browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/ul/li[2]/input').send_keys(username)            # 输入账号
@@ -49,11 +49,11 @@ print(browser.title)
 
 print("==== 给自己浇水 ====")
 browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()          
-time.sleep(1)
+time.sleep(4)
 
 print("==== 进入好友列表 ====")
 browser.find_element(By.XPATH,'/html/body/div[1]/div/div[8]/ul/li[3]/a').click()
-time.sleep(1)
+time.sleep(4)
 print("==== 筛选 (可施肥) ====")
 browser.find_element(By.XPATH,'//*[@class="filter-op"]/span').click()
 time.sleep(2)
@@ -61,11 +61,11 @@ time.sleep(2)
 for i in range(1,20):
     try:
         browser.find_element(By.XPATH,'//*[@class="can_fert icon_friends-fert"]').click()   # 选中一位好友
-        time.sleep(1)
+        time.sleep(4)
         browser.find_element(By.XPATH,'//*[@class="opIcon icon_fert"]').click()         # 浇水
-        time.sleep(1)
+        time.sleep(4)
         browser.find_element(By.XPATH,'//*[@class="back-home"]/span').click()           # 返回好友列表
-        time.sleep(1)
+        time.sleep(4)
         print ("==== 施肥成功 %d 好友 ====" % i)
     except:
         traceback.print_exc()
