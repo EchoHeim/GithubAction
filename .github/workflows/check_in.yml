@@ -1,4 +1,4 @@
-name: selenium
+name: Check-In
 
 # Controls when the action will run. 
 on:
@@ -29,7 +29,8 @@ jobs:
       - name: 'Set up Python'
         uses: actions/setup-python@v1
         with:
-           python-version: 3.7
+          python-version: 3.7
+          
       - name: 'Install requirements'
         run: |
           pip install --upgrade pip
