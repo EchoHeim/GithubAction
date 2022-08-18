@@ -1,5 +1,7 @@
 # GithubAction
 
+- [Crontab定时任务参考设置](https://crontab.guru/)
+
 # 1. selenium 自动化
 
 > 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/tree/master/selenium/Env_init.md)
