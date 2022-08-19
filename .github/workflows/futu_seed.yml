@@ -36,4 +36,5 @@ jobs:
           sudo rm -fr /usr/bin/chromedriver
           sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
-          python ./selenium/Futu/SeedFarm.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
+          cd ./selenium/Futu/
+          python SeedFarm.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
