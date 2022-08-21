@@ -34,15 +34,16 @@ jobs:
       - name: 'Install requirements'
         run: |
           pip install --upgrade pip
-          pip install -r ./requirements.txt
+          pip install -r ./selenium/requirements.txt
         
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v1
         
       - name: 'Working'
         run: |
-          # sudo cp -p ./chromedriver /usr/bin/
-          # chmod -R 777 /usr/bin/chromedriver
+          sudo cp -p ./chromedriver /usr/bin/
+          chmod -R 777 /usr/bin/chromedriver
+          cd ./selenium/Check-in/
           # python ./gamekegs.py ${{ secrets.GAMEKEGS_USERNAME }} ${{ secrets.GAMEKEGS_PASSWORD }}
           # python ./muacloud.py ${{ secrets.MUACLOUD_USERNAME }} ${{ secrets.MUACLOUD_PASSWORD }}
           # python ./hupu.py ${{ secrets.HUPU_USERNAME }} ${{ secrets.HUPU_PASSWORD }}

@@ -28,15 +28,13 @@ def get_web_driver():
     if platform.system() == 'Windows':
         print('\nCurrent Operating System: ==== Windows ====\n')
         browser = webdriver.Chrome('chromedriver.exe')
-
     elif platform.system() == 'Linux':
         print('\nCurrent Operating System: ==== Linux ====\n')
         chromedriver = "/usr/bin/chromedriver"
         os.environ["webdriver.chrome.driver"] = chromedriver
         browser = webdriver.Chrome(chrome_options=chrome_options, executable_path=chromedriver)
-
+        
     browser.implicitly_wait(10) # 所有的操作都可以最长等待10s
-
     return browser
 
 

@@ -5,11 +5,9 @@ sys.path.append("..")
 
 from base import *
 
-# username = sys.argv[1] # 登录账号
-# password = sys.argv[2] # 登录密码
+username = sys.argv[1] # 登录账号
+password = sys.argv[2] # 登录密码
 
-username = '416604093@qq.com'
-password = 'China1995'
 
 img_path = os.getcwd() + "/1.png"
 
@@ -18,16 +16,21 @@ def Breakdown52():
     try:
         driver = get_web_driver()
         driver.get("https://www.52pojie.cn/")
-        driver.find_element_by_xpath("//*[@id='nameOrEmail']").send_keys(username)
-        driver.find_element_by_xpath("//*[@id='loginPassword']").send_keys(password)
-        driver.find_element_by_xpath("//*[@class='green']").click()
 
-        driver.find_element_by_xpath("//*[@id='yesterday']").click()
+        # browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/ul/li[3]/input').send_keys(password)    
+
+        driver.find_element(By.XPATH,"//*[@id='ls_username']").send_keys(username)
+        driver.find_element(By.XPATH,"//*[@id='ls_password']").send_keys(password)
+        driver.find_element(By.XPATH,"//*[@class='pn vm']").click()
+
+        driver.find_element(By.XPATH,"//*[@id='yesterday']").click()
         print('52pojie 签到成功')
     except:
-        raise
+        print('52pojie 签到shib')
+        # raise
     finally:
-        driver.quit()
+        print('52pojie签到shib')
+        # driver.quit()
 
 if __name__ == '__main__':
     Breakdown52()
