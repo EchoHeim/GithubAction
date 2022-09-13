@@ -27,6 +27,9 @@ browser.implicitly_wait(10) # 所有的操作都可以最长等待10s
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
+print("==== 共清理 %s 条记录 ====\n" %num)
+print("==== 共清理 %s 条记录 ====\n" %num)
+
 # 登录地址
 website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%2FGithubAction'
 
