@@ -33,12 +33,14 @@ website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%
 browser.get(website)
 time.sleep(6)
 print(browser.title)
+print('当前页面url',browser.current_url)
 
 browser.find_element(By.XPATH,'//*[@id="login_field"]').send_keys(username)     # 输入账号
 browser.find_element(By.XPATH,'//*[@id="password"]').send_keys(password)        # 输入密码
 browser.find_element(By.XPATH,'//*[@value="Sign in"]').click()                  # 点击登录
 time.sleep(20)
 print(browser.title)
+print('当前页面url',browser.current_url)
 
 num = 0
 while True:
