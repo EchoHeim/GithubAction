@@ -8,7 +8,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 
-import os, sys, time, platform, traceback
+import os, sys, time, requests, platform, traceback
 
 chrome_options = webdriver.ChromeOptions()
 
@@ -27,23 +27,22 @@ browser.implicitly_wait(10) # 所有的操作都可以最长等待10s
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
-print("==== 共清理 %s 条记录 ====\n" % username)
-print("==== 共清理 %s 条记录 ====\n" % password)
-
 # 登录地址
 website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%2FGithubAction'
 
 browser.get(website)
-time.sleep(2)
+time.sleep(6)
+print(browser.title)
 
 browser.find_element(By.XPATH,'//*[@id="login_field"]').send_keys(username)     # 输入账号
 browser.find_element(By.XPATH,'//*[@id="password"]').send_keys(password)        # 输入密码
 browser.find_element(By.XPATH,'//*[@value="Sign in"]').click()                  # 点击登录
-time.sleep(10)
+time.sleep(20)
 print(browser.title)
 
 num = 0
 while True:
+    print("\n==== 下一页 ====\n")
     browser.find_element(By.XPATH,'//*[@id="actions-tab"]').click()        # Actions-tab
     time.sleep(8)
 
