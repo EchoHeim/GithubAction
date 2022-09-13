@@ -23,8 +23,12 @@ browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/input[4]').click
 time.sleep(8)
 print(browser.title)
 
-print("\n==== 给自己浇水 ====\n")
-browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()          
+try:
+    print("\n==== 给自己浇水 ====\n")
+    browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()     
+except:
+    break
+
 time.sleep(4)
 
 print("==== 进入好友列表 ====\n")
