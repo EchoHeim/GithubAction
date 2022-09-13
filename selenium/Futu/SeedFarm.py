@@ -27,7 +27,7 @@ try:
     print("\n==== 给自己浇水 ====\n")
     browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()     
 except:
-    break
+    print("==== 种子已成熟，需要重新播种！ ====\n")
 
 time.sleep(4)
 
@@ -38,7 +38,7 @@ print("==== 筛选 (可施肥) ====\n")
 browser.find_element(By.XPATH,'//*[@class="filter-op"]/span').click()
 time.sleep(2)
 
-for i in range(1,40):
+for i in range(0,40):
     try:
         browser.find_element(By.XPATH,'//*[@class="can_fert icon_friends-fert"]').click()   # 选中一位好友
         time.sleep(4)
@@ -46,8 +46,8 @@ for i in range(1,40):
         time.sleep(4)
         browser.find_element(By.XPATH,'//*[@class="back-home"]/span').click()           # 返回好友列表
         time.sleep(4)
-        print ("==== 施肥成功 %d 好友 ====" % i)
     except:
+        print ("==== 施肥成功 %d 好友 ====" % i)
         break
         
 print ("\n---- end ----\n")        
