@@ -8,9 +8,6 @@ from base import *
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
-# username = "17606536286" # 登录账号
-# password = "China1995" # 登录密码
-
 website='https://www.joinquant.com/user/login/index?type=login'
 
 @retry(stop_max_attempt_number=5)
