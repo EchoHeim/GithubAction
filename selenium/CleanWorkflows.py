@@ -28,7 +28,9 @@ username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
 # 登录地址
-website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%2FGithubAction'
+# website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%2FGithubAction'
+
+website='https://github.com/login'
 
 browser.get(website)
 time.sleep(6)
