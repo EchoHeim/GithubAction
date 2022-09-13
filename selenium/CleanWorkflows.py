@@ -14,7 +14,7 @@ chrome_options = webdriver.ChromeOptions()
 
 chrome_options.add_argument('--no-sandbox')     # 解决DevToolsActivePort文件不存在的报错
 chrome_options.add_argument('--disable-gpu')    # 谷歌文档提到需要加上这个属性来规避bug
-chrome_options.add_argument('--headless')       # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
+# chrome_options.add_argument('--headless')       # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
 
 chrome_options.add_argument('window-size=1920x1080')    # 指定浏览器分辨率
 chrome_options.add_argument('--disable-dev-shm-usage')
@@ -28,25 +28,20 @@ username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
 # 登录地址
-# website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%2FGithubAction'
-
-website='https://github.com/login'
+website='https://github.com/login?return_to=https%3A%2F%2Fgithub.com%2FEchoHeim%2FGithubAction'
 
 browser.get(website)
 time.sleep(6)
 print(browser.title)
-print('当前页面url',browser.current_url)
 
 browser.find_element(By.XPATH,'//*[@id="login_field"]').send_keys(username)     # 输入账号
 browser.find_element(By.XPATH,'//*[@id="password"]').send_keys(password)        # 输入密码
 browser.find_element(By.XPATH,'//*[@value="Sign in"]').click()                  # 点击登录
-time.sleep(20)
+time.sleep(10)
 print(browser.title)
-print('当前页面url',browser.current_url)
 
 num = 0
 while True:
-    print("\n==== 下一页 ====\n")
     browser.find_element(By.XPATH,'//*[@id="actions-tab"]').click()        # Actions-tab
     time.sleep(8)
 
