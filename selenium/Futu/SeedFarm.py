@@ -25,7 +25,7 @@ print(browser.title)
 
 try:
     print("\n==== 给自己浇水 ====\n")
-    browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()     
+    browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
 except:
     print("==== 种子已成熟，需要重新播种！ ====\n")
 
@@ -50,5 +50,5 @@ for i in range(0,40):
         print ("==== 施肥成功 %d 好友 ====" % i)
         break
         
-print ("\n---- end ----\n")        
+print ("\n---- end ----\n")
 browser.quit()

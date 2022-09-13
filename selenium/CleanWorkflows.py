@@ -60,5 +60,5 @@ while True:
     browser.find_element(By.XPATH,'//*[@class="btn-danger btn btn-block"]').click()
     time.sleep(2)
 
-print ("\n---- end ----\n")        
+print ("\n---- end ----\n")
 browser.quit()
