@@ -36,13 +36,13 @@ time.sleep(2)
 browser.find_element(By.XPATH,'//*[@id="login_field"]').send_keys(username)     # 输入账号
 browser.find_element(By.XPATH,'//*[@id="password"]').send_keys(password)        # 输入密码
 browser.find_element(By.XPATH,'//*[@value="Sign in"]').click()                  # 点击登录
-time.sleep(4)
+time.sleep(10)
 print(browser.title)
 
 num = 0
 while True:
     browser.find_element(By.XPATH,'//*[@id="actions-tab"]').click()        # Actions-tab
-    time.sleep(6)
+    time.sleep(8)
 
     try:
         # print("\n==== 下一页 ====\n")
@@ -54,11 +54,11 @@ while True:
         break
 
     browser.find_element(By.XPATH,'//*[@aria-label="Show options"]').click()
-    time.sleep(1)
+    time.sleep(2)
     browser.find_element(By.XPATH,'//*[@class="dropdown-item btn-link menu-item-danger"]').click()
-    time.sleep(2)
+    time.sleep(4)
     browser.find_element(By.XPATH,'//*[@class="btn-danger btn btn-block"]').click()
-    time.sleep(2)
+    time.sleep(4)
 
 print ("\n---- end ----\n")
 browser.quit()
