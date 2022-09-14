@@ -13,8 +13,11 @@ website='https://www.joinquant.com/user/login/index?type=login'
 @retry(stop_max_attempt_number=5)
 def joinquant():
     try:
+        print('---> JoinQuant get_web_driver!')
         browser = get_web_driver()
+        print('---> JoinQuant get_web_driver success!')
         browser.get(website)
+        print('---> JoinQuant get_web_driver get(website)!')
         time.sleep(4)
         print(browser.title)
 
