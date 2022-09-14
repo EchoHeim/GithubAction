@@ -44,7 +44,7 @@ jobs:
           chmod -R 777 /usr/bin/chromedriver
           cd ./selenium/Check-in/
           python ./JoinQuant.py  ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
-          # python ./v2ex.py  ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
+          python ./v2ex.py  ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
           # python ./91.py       ${{ secrets.WII_USERNAME}} ${{secrets.WII_PASSWORD}}
           # python ./gamekegs.py ${{ secrets.GAMEKEGS_USERNAME }} ${{ secrets.GAMEKEGS_PASSWORD }}
           # python ./muacloud.py ${{ secrets.MUACLOUD_USERNAME }} ${{ secrets.MUACLOUD_PASSWORD }}

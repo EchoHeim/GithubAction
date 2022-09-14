@@ -1,5 +1,7 @@
 # from PIL import Image
 import cv2, numpy as np
+import os, sys, time, ddddocr, requests, platform, traceback
+
 from retrying import retry
 
 from selenium import webdriver
@@ -9,8 +11,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
-
-import os, sys, time, ddddocr, requests, platform, traceback
 
 
 chrome_options = webdriver.ChromeOptions()
@@ -31,30 +31,29 @@ def get_web_driver():
         print('\nCurrent Operating System: ==== Linux ====\n')
         chromedriver = "/usr/bin/chromedriver"
         os.environ["webdriver.chrome.driver"] = chromedriver
-        if 'fv-az' in platform.node() :                 # github actions 服务器名
+        if 'fv-az' in platform.node() :                     # github actions 服务器名
             chrome_options.add_argument('--headless')       # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
-
         browser = webdriver.Chrome(chrome_options=chrome_options, executable_path=chromedriver)
         
     browser.implicitly_wait(10) # 所有的操作都可以最长等待10s
     return browser
 
 def checkPlatformInfo():
-    arch=platform.architecture()     #获取操作系统的位数
+    arch=platform.architecture()        # 获取操作系统的位数
     print("arch=",arch)
-    machine=platform.machine()      #计算机类型
+    machine=platform.machine()          # 计算机类型
     print("machine=",machine)
-    node=platform.node()             #计算机的网络名称
+    node=platform.node()                # 计算机的网络名称
     print("node=",node)
-    platformIofo=platform.platform()    #获取操作系统名称及版本号
+    platformIofo=platform.platform()    # 获取操作系统名称及版本号
     print("platformInfo=",platformIofo)
-    processor=platform.processor()       #计算机处理器信息
+    processor=platform.processor()      # 计算机处理器信息
     print("processor=",processor)
     system=platform.system()
     print("system=",system)
-    version=platform.version()     #获取操作系统版本号
+    version=platform.version()      # 获取操作系统版本号
     print("version=",version)
-    uname = platform.uname()  # 包含上面所有的信息汇总
+    uname = platform.uname()        # 包含上面所有的信息汇总
     print("uname=", uname)
 
 
@@ -66,7 +65,7 @@ def is_visible(driver, locator, timeout=10):
     except TimeoutException:
         return False
 
-def Ocr_Captcha(driver, locator, img_path): # 验证码识别
+def Ocr_Captcha(driver, locator, img_path):     # 验证码识别
     propertery = driver.find_element_by_xpath(locator)
     driver.save_screenshot(img_path)
     img = Image.open(img_path)

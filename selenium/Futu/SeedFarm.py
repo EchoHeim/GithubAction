@@ -24,8 +24,8 @@ time.sleep(8)
 print(browser.title)
 
 try:
-    print("\n==== 给自己浇水 ====\n")
     browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
+    print("\n==== 给自己浇水 ====\n")
 except:
     print("==== 种子已成熟，需要重新播种！ ====\n")
 
