@@ -13,11 +13,8 @@ website='https://www.joinquant.com/user/login/index?type=login'
 @retry(stop_max_attempt_number=5)
 def joinquant():
     try:
-        print('---> JoinQuant get_web_driver!')
         browser = get_web_driver()
-        print('---> JoinQuant get_web_driver success!')
         browser.get(website)
-        print('---> JoinQuant get_web_driver get(website)!')
         time.sleep(4)
         print(browser.title)
 
@@ -28,12 +25,13 @@ def joinquant():
         print(browser.title)
 
         # 点击 积分 页
+        /html/body/section/main/div/div[2]/div[2]/div[1]/div[2]
         browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]').click()
         time.sleep(4)
         browser.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
 
         # 签到
-        browser.find_element(By.XPATH,'/html/body/section/main/div/div[3]/div/div[2]/div[2]/dl/dd[2]/div[2]/div[2]/div[2]/div/a/button').click()
+        browser.find_element(By.XPATH,'/html/body/section/main/div/div[3]/div/div[2]/div[2]/dl/dd[2]/div[2]/div[2]/div[2]/div/button').click()
         print('---> JoinQuant 签到成功!')
         time.sleep(2)
 

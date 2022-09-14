@@ -34,8 +34,8 @@ jobs:
           pip install --upgrade pip
           pip install -r ./selenium/requirements.txt
         
-      - name: Prepare chromedriver
-        uses: nanasess/setup-chromedriver@v1
+      # - name: Prepare chromedriver
+      #   uses: nanasess/setup-chromedriver@v1
         
       - name: 'Working'
         run: |
