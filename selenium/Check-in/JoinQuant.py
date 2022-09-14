@@ -40,16 +40,20 @@ def joinquant():
         time.sleep(4)
 
         # 浏览文章
-        browser.switch_to.window(browser.window_handles[1])  # 切换回第一个页面
+        browser.switch_to.window(browser.window_handles[1])  # 切换页面
         browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[1]/div[2]/div[1]/div[4]/div/div[1]/div[1]').click()
+        browser.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
         print('==== 浏览文章 ====')
+        print(browser.title)
         time.sleep(4)
 
         # 返回主页领取积分
         browser.switch_to.window(browser.window_handles[0])  # 切换回第一个页面
         print('==== 返回积分主页 ====')
         browser.refresh()   # 刷新页面
-        time.sleep(4)
+        time.sleep(8)
+        print(browser.title)
+        print('==== 返回积分主页 0o ====')
 
         # 领取积分
         browser.find_element(By.XPATH,'/html/body/section/main/div/div[3]/div/div[2]/div[2]/dl/dd[2]/div[1]/div[2]/div[2]/div/button').click()
