@@ -39,7 +39,8 @@ jobs:
         
       - name: 'Working'
         run: |
-          sudo cp -p ./chromedriver /usr/bin/
+          sudo rm -fr /usr/bin/chromedriver
+          sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
           chmod -R 777 /usr/bin/chromedriver
           cd ./selenium/Check-in/
           python ./JoinQuant.py  ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
