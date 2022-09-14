@@ -40,6 +40,7 @@ def joinquant():
         time.sleep(4)
 
         # 浏览文章
+        browser.switch_to.window(browser.window_handles[1])  # 切换回第一个页面
         browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[1]/div[2]/div[1]/div[4]/div/div[1]/div[1]').click()
         print('==== 浏览文章 ====')
         time.sleep(4)
