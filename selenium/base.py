@@ -31,7 +31,7 @@ def get_web_driver():
         print('\nCurrent Operating System: ==== Linux ====\n')
         chromedriver = "/usr/bin/chromedriver"
         os.environ["webdriver.chrome.driver"] = chromedriver
-        if platform.node() == 'fv-az41-25':                 # github actions 服务器名
+        if 'fv-az' in platform.node() :                 # github actions 服务器名
             chrome_options.add_argument('--headless')       # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
 
         browser = webdriver.Chrome(chrome_options=chrome_options, executable_path=chromedriver)
