@@ -11,6 +11,8 @@ password = sys.argv[2] # 登录密码
 # 富途牛牛 种子农场 登录地址
 website='https://passport.futunn.com/?target=https%3A%2F%2Fseed.futunn.com%2F%3Flang%3Dzh-cn%26panel%3Dcultureroom#login'
 
+checkPlatformInfo()
+
 browser = get_web_driver()
 browser.get(website)
 time.sleep(4)

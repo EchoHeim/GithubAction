@@ -17,7 +17,7 @@ chrome_options = webdriver.ChromeOptions()
 
 chrome_options.add_argument('--no-sandbox')     # 解决DevToolsActivePort文件不存在的报错
 chrome_options.add_argument('--disable-gpu')    # 谷歌文档提到需要加上这个属性来规避bug
-# chrome_options.add_argument('--headless')       # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
+chrome_options.add_argument('--headless')       # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
 
 chrome_options.add_argument('window-size=1920x1080')    # 指定浏览器分辨率
 chrome_options.add_argument('--disable-dev-shm-usage')
@@ -36,6 +36,24 @@ def get_web_driver():
         
     browser.implicitly_wait(10) # 所有的操作都可以最长等待10s
     return browser
+
+def checkPlatformInfo():
+    arch=platform.architecture()     #获取操作系统的位数
+    print("arch=",arch)
+    machine=platform.machine()      #计算机类型
+    print("machine=",machine)
+    node=platform.node()             #计算机的网络名称
+    print("node=",node)
+    platformIofo=platform.platform()    #获取操作系统名称及版本号
+    print("platformInfo=",platformIofo)
+    processor=platform.processor()       #计算机处理器信息
+    print("processor=",processor)
+    system=platform.system()
+    print("system=",system)
+    version=platform.version()     #获取操作系统版本号
+    print("version=",version)
+    uname = platform.uname()  # 包含上面所有的信息汇总
+    print("uname=", uname)
 
 
 # 一直等待某元素可见，默认超时10秒（此函数暂时没有使用）
