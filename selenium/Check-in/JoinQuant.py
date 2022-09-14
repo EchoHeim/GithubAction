@@ -25,7 +25,6 @@ def joinquant():
         print(browser.title)
 
         # 点击 积分 页
-        /html/body/section/main/div/div[2]/div[2]/div[1]/div[2]
         browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]').click()
         time.sleep(4)
         browser.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
