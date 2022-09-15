@@ -38,8 +38,6 @@ jobs:
       
       - name: 'Working'
         run: |
-
-          cd ./selenium/Futu/
-          pwd 
-          echo "Running Selenium..."
+          uname -a
+          cd ./selenium/Futu
           python SeedFarm.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}

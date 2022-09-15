@@ -86,8 +86,10 @@ jobs:
         uses: actions/setup-python@v1
         with:
            python-version: 3.7
+
       - name: 'Install requirements'
         run: pip install -r ./Spider/requirements.txt
+        
       - name: 'Working'
         run: |
           sudo cp -p ./chrome/chromedriver /usr/bin/

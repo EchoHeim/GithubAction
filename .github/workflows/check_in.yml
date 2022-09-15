@@ -34,15 +34,13 @@ jobs:
           pip install --upgrade pip
           pip install -r ./selenium/requirements.txt
         
-      # - name: Prepare chromedriver
-      #   uses: nanasess/setup-chromedriver@v1
+      - name: Prepare chromedriver
+        uses: nanasess/setup-chromedriver@v1
         
       - name: 'Working'
         run: |
-          sudo rm -fr /usr/bin/chromedriver
-          sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
-          chmod -R 777 /usr/bin/chromedriver
-          cd ./selenium/Check-in/
+          uname -a
+          cd ./selenium/Check-in
           python ./JoinQuant.py  ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
           python ./v2ex.py  ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
           # python ./91.py       ${{ secrets.WII_USERNAME}} ${{secrets.WII_PASSWORD}}
