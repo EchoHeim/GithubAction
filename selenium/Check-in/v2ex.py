@@ -1,7 +1,13 @@
-from util import *
+# -*- coding: UTF-8 -*-
+
+import sys 
+sys.path.append("..") 
+
+from base import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
+
 img_path = os.getcwd() + "/1.png"
 
 @retry(stop_max_attempt_number=5)

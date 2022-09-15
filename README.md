@@ -6,14 +6,15 @@
 
 > 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/tree/master/selenium/Env_init.md)
 
-- 富途种子
+- 网站签到
+
+    - [聚宽JoinQuant](https://www.joinquant.com/view/user/floor?type=mainFloor)
+    - [v2ex论坛](https://v2ex.com/member/MacLodge)
+
+- [富途种子](https://seed.futunn.com/?lang=zh-cn&panel=cultureroom)
 
     自动浇水，帮好友施肥
 
 - 清除工作流日志
 
     > 不能在 github actions 中运行，可手动指定仓库链接，登录后自动删除工作流日志。
-
-- 网站签到
-
-    - 吾爱破解

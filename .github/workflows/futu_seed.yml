@@ -29,14 +29,17 @@ jobs:
         uses: actions/setup-python@v1
         with:
           python-version: 3.7
-
+      
       - name: 'Install requirements'
         run: pip install -r ./selenium/requirements.txt
-        
+      
+      - name: Prepare chromedriver
+        uses: nanasess/setup-chromedriver@v1
+      
       - name: 'Working'
         run: |
-          sudo rm -fr /usr/bin/chromedriver
-          sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
-          chmod -R 777 /usr/bin/chromedriver
+
           cd ./selenium/Futu/
+          pwd 
+          echo "Running Selenium..."
           python SeedFarm.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
