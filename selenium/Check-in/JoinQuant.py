@@ -44,20 +44,6 @@ def joinquant():
         browser.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
         print('==== 浏览文章 ====')
         print(browser.title)
-        time.sleep(4)
-
-        # 返回主页领取积分
-        browser.switch_to.window(browser.window_handles[0])  # 切换回第一个页面
-        print('==== 返回积分主页 ====')
-        browser.refresh()   # 刷新页面
-        time.sleep(8)
-        print(browser.title)
-        print('==== 返回积分主页 0o ====')
-
-        # 领取积分
-        # browser.find_element(By.XPATH,'/html/body/section/main/div/div[3]/div/div[2]/div[2]/dl/dd[1]/div[1]/div[2]/div[2]/div/button').click()
-        # print('---> JoinQuant 积分领取成功!')
-        # time.sleep(4)
 
     except:
         print('===> JoinQuant 签到失败!')
@@ -96,5 +82,5 @@ def joinquant_get():
 
 
 if __name__ == '__main__':
-    # joinquant()
+    joinquant()
     joinquant_get()
