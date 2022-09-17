@@ -45,8 +45,15 @@ def joinquant():
         browser.switch_to.window(browser.window_handles[2])  # 切换页面
         print('==== 浏览文章 ====')
         time.sleep(4)
+        browser.refresh()   # 刷新页面
+        time.sleep(4)
         browser.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
         print(browser.title)
+
+#    browser.switch_to.window(browser.window_handles[0])  # 切换回第一个页面
+#         print('==== 返回积分主页 ====')
+        
+        time.sleep(4)
 
     except:
         print('===> JoinQuant 签到失败!')
