@@ -30,8 +30,9 @@ if num == 0:
     print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
 else:
     try:
-        num=num-1
-        print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
+        # num=num-1
+        # print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
+        print("\n==== 给自己浇水 ====\n")
         browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
     except:
         WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
