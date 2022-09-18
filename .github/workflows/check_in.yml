@@ -32,7 +32,7 @@ jobs:
       - name: 'Install requirements'
         run: |
           pip install --upgrade pip
-          pip install -r ./selenium/requirements.txt
+          pip install -r ./ChromeSelenium/requirements.txt
         
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v1
@@ -40,9 +40,8 @@ jobs:
       - name: 'Working'
         run: |
           uname -a
-          cd ./selenium/Check-in
-          python ./JoinQuant.py  ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
-          python ./v2ex.py  ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
+          python -B -m ChromeSelenium.Check-in.JoinQuant  ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
+          python -B -m ChromeSelenium.Check-in.v2ex  ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
           # python ./91.py       ${{ secrets.WII_USERNAME}} ${{secrets.WII_PASSWORD}}
           # python ./gamekegs.py ${{ secrets.GAMEKEGS_USERNAME }} ${{ secrets.GAMEKEGS_PASSWORD }}
           # python ./muacloud.py ${{ secrets.MUACLOUD_USERNAME }} ${{ secrets.MUACLOUD_PASSWORD }}
