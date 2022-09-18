@@ -1,4 +1,4 @@
-# from PIL import Image
+from PIL import Image
 import cv2, numpy as np
 import os, sys, time, ddddocr, requests, platform, traceback
 
@@ -66,7 +66,8 @@ def is_visible(driver, locator, timeout=10):
         return False
 
 def Ocr_Captcha(driver, locator, img_path):     # 验证码识别
-    propertery = driver.find_element_by_xpath(locator)
+    # propertery = driver.find_element_by_xpath(locator)
+    propertery = driver.find_element(By.XPATH,'//*[@id="captcha-image"]')
     driver.save_screenshot(img_path)
     img = Image.open(img_path)
     location = propertery.location

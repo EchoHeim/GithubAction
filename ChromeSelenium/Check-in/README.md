@@ -27,7 +27,4 @@ fork本项目后，在Settings->Secrets中新建仓库密码（New repository se
 
 现在不需要手动上传chromedriver，也不需要每次手动更新chromedriver，main.yaml脚本支持自动获取最新的chromedriver文件
 
-### 参考项目
 
-- [掘金滑动拼图验证码识别](https://github.com/shuai93/juejin)
-- [图片验证码ocr](https://github.com/sml2h3/ddddocr)

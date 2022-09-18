@@ -18,3 +18,9 @@
 - 清除工作流日志
 
     > 不能在 github actions 中运行，可手动指定仓库链接，登录后自动删除工作流日志。
+
+
+# 参考项目
+
+- [掘金滑动拼图验证码识别](https://github.com/shuai93/juejin)
+- [图片验证码ocr](https://github.com/sml2h3/ddddocr)

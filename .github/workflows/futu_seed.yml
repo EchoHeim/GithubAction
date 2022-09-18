@@ -39,5 +39,4 @@ jobs:
       - name: 'Working'
         run: |
           uname -a
-          cd ./selenium/Futu
-          python SeedFarm.py ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
+          python -B -m ChromeSelenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}

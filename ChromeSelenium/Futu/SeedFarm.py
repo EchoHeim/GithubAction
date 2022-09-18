@@ -1,9 +1,9 @@
 # -*- coding: UTF-8 -*-
 
-import sys 
-sys.path.append("..") 
+import sys
 
-from base import *
+from ChromeSelenium.base import *
+from WeCom import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
@@ -23,11 +23,18 @@ browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/input[4]').click
 time.sleep(8)
 print(browser.title)
 
-try:
-    browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
-    print("\n==== 给自己浇水 ====\n")
-except:
-    print("==== 种子已成熟，需要重新播种！ ====\n")
+WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
+
+num=browser.find_element(By.XPATH,'//*[@class="opBtn waterBtn ng-scope"]').text
+if num == 0:
+    try:
+        print("\n==== 给自己浇水 ====\n")
+        browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
+    except:
+        WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
+        print("\n==== 种子已成熟，需要重新播种！ ====\n")
+else:
+    print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
 
 time.sleep(4)
 
