@@ -39,4 +39,5 @@ jobs:
       - name: 'Working'
         run: |
           uname -a
+          ifconfig
           python -B -m ChromeSelenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}
