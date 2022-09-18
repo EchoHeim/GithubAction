@@ -27,14 +27,14 @@ WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
 
 num=browser.find_element(By.XPATH,'//*[@class="opBtn waterBtn ng-scope"]').text
 if num == 0:
+    print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
+else:
     try:
-        print("\n==== 给自己浇水 ====\n")
+        print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % num)
         browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
     except:
         WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
         print("\n==== 种子已成熟，需要重新播种！ ====\n")
-else:
-    print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
 
 time.sleep(4)
 
