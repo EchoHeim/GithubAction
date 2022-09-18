@@ -5,11 +5,9 @@ sys.path.append("..")
 
 from base import *
 
-# username = sys.argv[1] # 登录账号
-# password = sys.argv[2] # 登录密码
+username = sys.argv[1] # 登录账号
+password = sys.argv[2] # 登录密码
 
-username = "MacLodge"
-password = "china1995"
 
 def fishpi():
     try:
