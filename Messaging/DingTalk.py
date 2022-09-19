@@ -34,27 +34,23 @@ def send_request(url, datas):
 
 def get_string():
     '''
-    自己想要发送的内容,注意消息格式,如果选择markdown,字符串中应为包含Markdown格式的内容
+    想要发送的内容,注意消息格式,如果选择 markdown,字符串中应为包含Markdown格式的内容
     '''
-    str = "<font color=#00ffff>GitAction 昨日销售额:233</font> </br> <font color=#00ffff>昨日销量:XXX</font>"
+    str = "## GithubAction \n <font color=#00ffff>测试信息！</font>"
     
     return str
 
-def main():
-    # isAtAll：是否@所有人
+def DingTalk_SendMsg(Obj,Msg):
+    
     dict = {
         "msgtype": "markdown",
-        "markdown": {"title": "GitAction",
-                     "text": ""
-                     },
+
+        "markdown": {
+            "title": Obj,
+            "text": Msg
+        },
         "at": {
-            "isAtAll": False
+            "isAtAll": False    # isAtAll：是否@所有人
         }
     }
-
-    #把文案内容写入请求格式中
-    dict["markdown"]["text"] = get_string()
     send_request(url, dict)
-
-if __name__ == '__main__':
-    main()

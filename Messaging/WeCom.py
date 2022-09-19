@@ -59,7 +59,7 @@ class WeChatPub:
             print("send message error", res)
             return res
 
-def WeCom_SendMsg(Obi,Msg):
+def WeCom_SendMsg(Obj,Msg):
     wechat = WeChatPub()
     timenow = time.strftime(" %Y-%m-%d %H:%M:%S ",time.localtime())
-    wechat.send_msg(Obi, f"<div class=\"gray\"> {timenow} </div> <div class=\"normal\"> ==== 温馨提醒! ==== </div> <div class=\"highlight\"> {Msg} </div>")
+    wechat.send_msg(Obj, f"<div class=\"gray\"> {timenow} </div> <div class=\"normal\"> ==== 温馨提醒! ==== </div> <div class=\"highlight\"> {Msg} </div>")
