@@ -19,7 +19,7 @@
         selenium==3.141.0
         ```
 
-        > 用来安装python包
+        > 用来批量安装python包，后面数字对应软件包版本号。
     
     -  test.py
 
@@ -54,6 +54,8 @@
 ![image](https://user-images.githubusercontent.com/26021085/184545391-ab1c548c-2d29-46e8-9d19-38c4784d7784.png)
 
 - 创建 `.yml` 文件, 替换以下信息
+
+    > yml文件会存放在项目根目录 `.github/workflows/` 文件夹下
 
 ``` yml
 name: selenium

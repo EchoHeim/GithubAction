@@ -1,9 +1,9 @@
 # -*- coding: UTF-8 -*-
 
 import sys
-sys.path.append("..")
 
-from base import *
+from ChromeSelenium.base import *
+from Messaging.WeCom import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
@@ -52,6 +52,7 @@ def joinquant():
 
         browser.switch_to.window(browser.window_handles[0])  # 切换回第一个页面
         print('==== 返回积分主页 ====')
+        time.sleep(40)
         browser.refresh()   # 刷新页面
         time.sleep(4)
 
@@ -97,7 +98,6 @@ def joinquant_get():
         print('===> JoinQuant 积分领取失败!')
     finally:
         browser.quit()
-
 
 if __name__ == '__main__':
     joinquant()

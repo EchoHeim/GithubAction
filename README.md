@@ -4,7 +4,7 @@
 
 # 1. selenium 自动化
 
-> 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/tree/master/selenium/Env_init.md)
+> 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/blob/master/ChromeSelenium/Env_init.md)
 
 - 网站签到
 
@@ -24,3 +24,6 @@
 
 - [掘金滑动拼图验证码识别](https://github.com/shuai93/juejin)
 - [图片验证码ocr](https://github.com/sml2h3/ddddocr)
+
+
+

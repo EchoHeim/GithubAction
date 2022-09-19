@@ -3,7 +3,7 @@
 import sys
 
 from ChromeSelenium.base import *
-from WeCom import *
+from Messaging.WeCom import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
