@@ -28,7 +28,7 @@ if int(num) == 0:
     print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
 else:
     try:
-        num=num-1
+        num=int(num)-1
         print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
         browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
     except:
