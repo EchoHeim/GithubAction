@@ -71,34 +71,5 @@ def joinquant():
     finally:
         browser.quit()
 
-def joinquant_get():
-    try:
-        browser = get_web_driver()
-        browser.get(website)
-        time.sleep(4)
-        print(browser.title)
-
-        browser.find_element(By.XPATH,'//*[@class="phone pwd-phone"]').send_keys(username)
-        browser.find_element(By.XPATH,'//*[@class="jq-login__password"]').send_keys(password)
-        browser.find_element(By.XPATH,'//*[@class="login-submit btnPwdSubmit"]').click()        # 点击登录
-        time.sleep(4)
-        print(browser.title)
-
-        # 点击 积分 页
-        browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]').click()
-        time.sleep(4)
-        browser.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
-        
-        # 领取积分
-        browser.find_element(By.XPATH,'/html/body/section/main/div/div[3]/div/div[2]/div[2]/dl/dd[1]/div[1]/div[2]/div[2]/div/button').click()
-        print('---> JoinQuant 积分领取成功!')
-        time.sleep(4)
-
-    except:
-        print('===> JoinQuant 积分领取失败!')
-    finally:
-        browser.quit()
-
 if __name__ == '__main__':
     joinquant()
-    # joinquant_get()
