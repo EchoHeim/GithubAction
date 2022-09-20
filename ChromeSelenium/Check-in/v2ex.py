@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 
-import sys 
+import sys
 
 from ChromeSelenium.base import *
 from Messaging.WeCom import *

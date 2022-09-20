@@ -19,9 +19,26 @@
 
     > 不能在 github actions 中运行，可手动指定仓库链接，登录后自动删除工作流日志。
 
+# 2. 天气预报信息
+
+自动获取指定城市的天气状况，然后邮件发送给收件人
+
+[详细说明](https://github.com/EchoHeim/GithubAction/blob/master/Weather/README.md)
+
+
 # 参考项目
 
 - [掘金滑动拼图验证码识别](https://github.com/shuai93/juejin)
 - [图片验证码ocr](https://github.com/sml2h3/ddddocr)
 
 - [钉钉开发文档](https://open.dingtalk.com/document/robots/custom-robot-access)
+
+## References
+An example of GitHub Actions: sending daily weather report with email.
+
+Visit [reference blog](http://www.ruanyifeng.com/blog/2019/12/github_actions.html) (in Chinese) for details.
+
+- [signalnerve/github-actions-weather-bot](https://github.com/signalnerve/github-actions-weather-bot)
+- [chubin/wttr.in](https://github.com/chubin/wttr.in)
+
+
