@@ -4,7 +4,7 @@
 
 # 1. selenium 自动化
 
-> 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/blob/master/ChromeSelenium/Env_init.md)
+> 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/blob/master/ChromeSelenium/README.md)
 
 - 网站签到
 

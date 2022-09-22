@@ -54,3 +54,7 @@ def DingTalk_SendMsg(Obj,Msg):
         }
     }
     send_request(url, dict)
+
+num=2
+str = "## JoinQuant \n <font color=#00ffff> 当前积分: " +  str(num) + " </font>" 
+DingTalk_SendMsg("GitAction",str)

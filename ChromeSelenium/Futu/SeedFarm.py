@@ -32,6 +32,8 @@ else:
         print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
         browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
     except:
+        str = "## 富途种子 \n <font color=#331122> 种子已成熟，需要重新播种！ </font>" 
+        DingTalk_SendMsg("GitAction",str)
         WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
         print("\n==== 种子已成熟，需要重新播种！ ====\n")
 
