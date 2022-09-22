@@ -1,9 +1,9 @@
 # -*- coding: UTF-8 -*-
 
 import sys 
-sys.path.append("..") 
 
-from base import *
+from ChromeSelenium.base import *
+from Messaging.Msg import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
@@ -19,11 +19,10 @@ def fishpi():
         driver.find_element(By.XPATH,"/html/body/div[3]/div/div[1]/div/button[1]").click()
         time.sleep(4)
 
-        driver.find_element(By.XPATH,"//*[@id='yesterday']").click()
-
+        driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("hello~")
+        driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
+        time.sleep(40)
         
-        driver.get('https://v2ex.com/mission/daily')
-        driver.find_element(By.XPATH,"//*[@type='button']").click()
 
         print('fishpi - 签到成功')
     except:

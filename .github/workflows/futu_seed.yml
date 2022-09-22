@@ -28,18 +28,18 @@ jobs:
         run: curl https://api.ipify.org
 
       # Runs a single command using the runners shell
-      - name: 'Set up Python'
+      - name: 🌠 Set up Python
         uses: actions/setup-python@v1
         with:
           python-version: 3.10.6
       
-      - name: 'Install requirements'
+      - name: 💈 Install requirements
         run: pip install -r ./ChromeSelenium/requirements.txt
       
-      - name: Prepare chromedriver
+      - name: ⏳ Prepare chromedriver
         uses: nanasess/setup-chromedriver@v1
       
-      - name: 'Working'
+      - name: 🎐 Working
         run: |
           uname -a
           python -B -m ChromeSelenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }}

@@ -25,20 +25,9 @@
 
 [详细说明](https://github.com/EchoHeim/GithubAction/blob/master/Weather/README.md)
 
-
 # 参考项目
 
 - [掘金滑动拼图验证码识别](https://github.com/shuai93/juejin)
 - [图片验证码ocr](https://github.com/sml2h3/ddddocr)
 
 - [钉钉开发文档](https://open.dingtalk.com/document/robots/custom-robot-access)
-
-## References
-An example of GitHub Actions: sending daily weather report with email.
-
-Visit [reference blog](http://www.ruanyifeng.com/blog/2019/12/github_actions.html) (in Chinese) for details.
-
-- [signalnerve/github-actions-weather-bot](https://github.com/signalnerve/github-actions-weather-bot)
-- [chubin/wttr.in](https://github.com/chubin/wttr.in)
-
-

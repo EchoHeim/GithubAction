@@ -3,8 +3,7 @@
 import sys
 
 from ChromeSelenium.base import *
-from Messaging.WeCom import *
-from Messaging.DingTalk import *
+from Messaging.Msg import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
@@ -16,6 +15,8 @@ browser.get(website)
 time.sleep(4)
 print(browser.title)
 
+str = "## JoinQuant "
+
 try:
     browser.find_element(By.XPATH,'//*[@class="phone pwd-phone"]').send_keys(username)
     browser.find_element(By.XPATH,'//*[@class="jq-login__password"]').send_keys(password)
@@ -24,7 +25,19 @@ try:
     print(browser.title)
 except:
     print('\n===> JoinQuant 登录失败!')
+    str = str + "\n > ---- 登录失败! ----"
 
+# 显示当前积分
+try:
+    browser.refresh()   # 刷新页面
+    time.sleep(10)
+    num=browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]/span').text
+    print('\n---> JoinQuant: 当前积分 %d \n' % int(num))
+    str = str + "\n > <font color=#fc6315> 昨日积分: </font>" + str(num) + " "
+except:
+    print('\n===> Err: < 显示当前积分 >')
+    str = str + "\n > ---- 无法显示积分! ----"
+    
 try:
     # 点击 积分 页
     browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]').click()
@@ -34,6 +47,7 @@ try:
     time.sleep(2)
 except:
     print('\n===> JoinQuant 签到失败!')
+    str = str + "\n > ---- 签到失败! ----"
 
 try:
     # 进入社区页面
@@ -43,6 +57,7 @@ try:
     print(browser.title)
 except:
     print('\n===> Err: < 进入社区页面 >')
+    str = str + "\n > ---- 无法进入社区页面! ----"
 
 try:
     # 浏览文章
@@ -55,6 +70,7 @@ try:
     print(browser.title)
 except:
     print('\n===> Err: < 浏览文章 >')
+    str = str + "\n > ---- 无法浏览文章! ----"
 
 browser.switch_to.window(browser.window_handles[0])  # 切换回第一个页面
 print('\n==== 返回积分主页 ====')
@@ -73,6 +89,7 @@ try:
     time.sleep(4)
 except:
     print('\n===> JoinQuant 积分领取失败!')
+    str = str + "\n > ---- 积分领取失败! ----"
 
 # 显示当前积分
 try:
@@ -80,13 +97,12 @@ try:
     time.sleep(10)
     num=browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]/span').text
     print('\n---> JoinQuant: 当前积分 %d \n' % int(num))
-
-    str = "## JoinQuant \n <font color=#00ffff> 当前积分: " +  str(num) + " </font>" 
-    DingTalk_SendMsg("GitAction",str)
-
+    str = str + "\n > <font color=#fc6315> 当前积分: </font>" + str(num) + " "
 except:
     print('\n===> Err: < 显示当前积分 >')
-    DingTalk_SendMsg("GitAction","显示当前积分")
+    str = str + "\n > ---- 无法显示积分! ----"
+
+DingTalk_SendMsg("GitAction",str)
 
 # 退出Chrome
 browser.quit()

@@ -3,8 +3,7 @@
 import sys
 
 from ChromeSelenium.base import *
-from Messaging.WeCom import *
-from Messaging.DingTalk import *
+from Messaging.Msg import *
 
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
@@ -33,10 +32,10 @@ try:
         print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
         browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
 except:
-    str = "## 富途种子 \n <font color=#331122> 种子已成熟，需要重新播种！ </font>" 
+    str = "## 富途种子 \n <font color=#22a2c3> 🎋 种子已成熟，需要重新播种！ </font>" 
     DingTalk_SendMsg("GitAction",str)
-    WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
-    print("\n==== 种子已成熟，需要重新播种！ ====\n")
+    WeCom_SendMsg("HuangShiLong","🎋 种子已成熟，需要重新播种！")
+    print("\n==== 🎋 种子已成熟，需要重新播种！ ====\n")
 
 time.sleep(4)
 

@@ -14,10 +14,8 @@ string_to_sign = '{}\n{}'.format(timestamp, secret)
 string_to_sign_enc = string_to_sign.encode('utf-8')
 hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
 sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
-print(timestamp)
-print(sign)
 
-url = f'https://oapi.dingtalk.com/robot/send?access_token=38d45d1bd56eafcb5e16b9356519bb5425490894805c7e1578bada250ae51034&timestamp={timestamp}&sign={sign}'
+url_token = f'https://oapi.dingtalk.com/robot/send?access_token=38d45d1bd56eafcb5e16b9356519bb5425490894805c7e1578bada250ae51034&timestamp={timestamp}&sign={sign}'
 
 def send_request(url, datas):
     header = {
@@ -26,7 +24,7 @@ def send_request(url, datas):
     }
     sendData = json.dumps(datas)
     sendDatas = sendData.encode("utf-8")
-    request = urllib.request.Request(url=url, data=sendDatas, headers=header)
+    request = urllib.request.Request(url=url_token, data=sendDatas, headers=header)
     opener = urllib.request.urlopen(request)
 
     # 输出响应结果
@@ -53,8 +51,4 @@ def DingTalk_SendMsg(Obj,Msg):
             "isAtAll": False    # isAtAll：是否@所有人
         }
     }
-    send_request(url, dict)
-
-# num=2
-# str = "## JoinQuant \n <font color=#00ffff> 当前积分: " +  str(num) + " </font>" 
-# DingTalk_SendMsg("GitAction",str)
+    send_request(url_token, dict)

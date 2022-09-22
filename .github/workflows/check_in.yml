@@ -24,12 +24,12 @@ jobs:
         uses: actions/checkout@v2
 
       # Runs a single command using the runners shell
-      - name: 'Set up Python'
+      - name: Set up Python
         uses: actions/setup-python@v1
         with:
           python-version: 3.10.6
           
-      - name: 'Install requirements'
+      - name: Install requirements
         run: |
           pip install --upgrade pip
           pip install -r ./ChromeSelenium/requirements.txt
@@ -37,13 +37,10 @@ jobs:
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v1
         
-      - name: 'Working'
+      - name: Working
         run: |
           uname -a
-          python -B -m ChromeSelenium.Check-in.JoinQuant  ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
-          python -B -m ChromeSelenium.Check-in.v2ex  ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
-          # python ./91.py       ${{ secrets.WII_USERNAME}} ${{secrets.WII_PASSWORD}}
-          # python ./gamekegs.py ${{ secrets.GAMEKEGS_USERNAME }} ${{ secrets.GAMEKEGS_PASSWORD }}
-          # python ./muacloud.py ${{ secrets.MUACLOUD_USERNAME }} ${{ secrets.MUACLOUD_PASSWORD }}
-          # python ./hupu.py ${{ secrets.HUPU_USERNAME }} ${{ secrets.HUPU_PASSWORD }}
-          # python ./juejin.py   ${{ secrets.JUEJIN_USERNAME }} ${{ secrets.JUEJIN_PASSWORD }}
+          python -B -m ChromeSelenium.Check-in.JoinQuant ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }}
+          python -B -m ChromeSelenium.Check-in.fishpi ${{ secrets.FISHPI_USERNAME }} ${{ secrets.FISHPI_PASSWORD }}
+          python -B -m ChromeSelenium.Check-in.v2ex ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }}
+          
