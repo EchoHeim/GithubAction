@@ -24,19 +24,19 @@ browser.find_element(By.XPATH,'//*[@id="loginFormWrapper"]/form/input[4]').click
 time.sleep(8)
 print(browser.title)
 
-num=browser.find_element(By.XPATH,'//*[@class="opBtn waterBtn ng-scope"]').text
-if int(num) == 0:
-    print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
-else:
-    try:
+try:
+    num=browser.find_element(By.XPATH,'//*[@class="opBtn waterBtn ng-scope"]').text
+    if int(num) == 0:
+        print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
+    else:
         num=int(num)-1
         print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
         browser.find_element(By.XPATH,'//*[@class="waterCanvas"]').click()
-    except:
-        str = "## 富途种子 \n <font color=#331122> 种子已成熟，需要重新播种！ </font>" 
-        DingTalk_SendMsg("GitAction",str)
-        WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
-        print("\n==== 种子已成熟，需要重新播种！ ====\n")
+except:
+    str = "## 富途种子 \n <font color=#331122> 种子已成熟，需要重新播种！ </font>" 
+    DingTalk_SendMsg("GitAction",str)
+    WeCom_SendMsg("HuangShiLong","种子已成熟，需要重新播种！")
+    print("\n==== 种子已成熟，需要重新播种！ ====\n")
 
 time.sleep(4)
 
