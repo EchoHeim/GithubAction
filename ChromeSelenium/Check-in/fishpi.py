@@ -8,7 +8,6 @@ from Messaging.Msg import *
 username = sys.argv[1] # 登录账号
 password = sys.argv[2] # 登录密码
 
-
 def fishpi():
     try:
         driver = get_web_driver()
@@ -19,14 +18,47 @@ def fishpi():
         driver.find_element(By.XPATH,"/html/body/div[3]/div/div[1]/div/button[1]").click()
         time.sleep(4)
 
+        print("---> 领取昨日奖励")
+        driver.find_element(By.XPATH,'//*[@id="yesterdayImg"]').click() 
+        time.sleep(2)
+
+        print("---> 聊天发言 1")
         driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("hello~")
         driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
-        time.sleep(40)
-        
+        time.sleep(300)
+
+        print("---> 聊天发言 2")
+        driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("你好~")
+        driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
+        time.sleep(300)
+
+        print("---> 聊天发言 3")
+        driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("hello~")
+        driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
+        time.sleep(300)
+
+        print("---> 浏览文章")
+        driver.find_element(By.XPATH,'//*[@id="randomArticles"]/li[4]/a[2]').click()
+        time.sleep(4)
+        driver.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
+        time.sleep(2)
+        print("---> 文章点赞")
+        driver.find_element(By.XPATH,"/html/body/div[12]/div/span[1]").click()
+
+        driver.back()
+        print("---> 返回上一页")
+        time.sleep(6)
+        print("---> 浏览文章")
+        driver.find_element(By.XPATH,'//*[@id="randomArticles"]/li[6]/a[2]').click()
+        time.sleep(4)
+        driver.execute_script("window.scrollBy(0,400)")  # 向下滑动400个像素
+        time.sleep(2)
+        print("---> 文章点赞")
+        driver.find_element(By.XPATH,"/html/body/div[12]/div/span[1]").click()
 
         print('fishpi - 签到成功')
     except:
-        raise
+        print('fishpi - 签到失败')
     finally:
         driver.quit()
 
