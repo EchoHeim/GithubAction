@@ -29,7 +29,7 @@ except:
 
 # 显示当前积分
 try:
-    time.sleep(10)
+    time.sleep(20)
     num=browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]/span').text
     print('\n---> JoinQuant: 当前积分 %d \n' % int(num))
     str = str + "\n > ### 签到前 \n <font color=#fc6315> 昨日积分: </font>" + num + " "
@@ -92,7 +92,7 @@ except:
 
 # 显示当前积分
 try:
-    time.sleep(10)
+    time.sleep(20)
     num=browser.find_element(By.XPATH,'/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]/span').text
     print('\n---> JoinQuant: 当前积分 %d \n' % int(num))
     str = str + "\n > ### 签到后 \n <font color=#fc6315> 当前积分: </font>" + num + " "

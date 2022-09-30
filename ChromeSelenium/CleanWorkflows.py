@@ -41,25 +41,26 @@ time.sleep(10)
 print(browser.title)
 
 num = 0
-while True:
-    browser.find_element(By.XPATH,'//*[@id="actions-tab"]').click()        # Actions-tab
-    time.sleep(8)
 
+browser.find_element(By.XPATH,'//*[@id="actions-tab"]').click()        # Actions-tab
+time.sleep(8)
+
+browser.find_element(By.XPATH,'//*[@class="next_page"]').click()
+print("\n==== 下一页 ====\n")
+time.sleep(4)
+
+while True:
     try:
-        # print("\n==== 下一页 ====\n")
-        browser.find_element(By.XPATH,'//*[@class="next_page"]').click()
+        browser.find_element(By.XPATH,'//*[@aria-label="Show options"]').click()
+        time.sleep(2)
+        browser.find_element(By.XPATH,'//*[@class="dropdown-item btn-link menu-item-danger"]').click()
+        time.sleep(4)
+        browser.find_element(By.XPATH,'//*[@class="btn-danger btn btn-block"]').click()
         time.sleep(4)
         num = num + 1
     except:
         print("==== 共清理 %d 条记录 ====\n" %num)
         break
-
-    browser.find_element(By.XPATH,'//*[@aria-label="Show options"]').click()
-    time.sleep(2)
-    browser.find_element(By.XPATH,'//*[@class="dropdown-item btn-link menu-item-danger"]').click()
-    time.sleep(4)
-    browser.find_element(By.XPATH,'//*[@class="btn-danger btn btn-block"]').click()
-    time.sleep(4)
 
 print ("\n---- end ----\n")
 browser.quit()

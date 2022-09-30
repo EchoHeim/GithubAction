@@ -37,6 +37,21 @@ def fishpi():
         driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
         time.sleep(300)
 
+        print("---> 聊天发言 4")
+        driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("di~")
+        driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
+        time.sleep(300)
+
+        print("---> 聊天发言 5")
+        driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("Are you OK?")
+        driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
+        time.sleep(300)
+
+        print("---> 聊天发言 6")
+        driver.find_element(By.XPATH,'//*[@placeholder="简单聊聊 (高级功能请访问完整版聊天室哦)"]').send_keys("hello~")
+        driver.find_element(By.XPATH,"//*[@onclick='sendChat()']").click()
+        time.sleep(300)
+
         print("---> 浏览文章")
         driver.find_element(By.XPATH,'//*[@id="randomArticles"]/li[4]/a[2]').click()
         time.sleep(4)
