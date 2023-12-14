@@ -22,6 +22,7 @@ browser.get(website)
 time.sleep(4)
 print(browser.title)
 
+
 browser.find_element(
     By.XPATH, "/html/body/div[1]/div[2]/div/div[2]/p[3]/a"
 ).click()  # 登录
@@ -76,7 +77,10 @@ for i in range(40):
         browser.find_element(By.XPATH, '//*[@class="back-home"]/span').click()  # 返回好友列表
         time.sleep(4)
     except Exception:
-        msg = f"<font color='blue'> ==== 施肥成功 </font>{str(i)}" + "<font color='blue'> 好友 ====</font>\n"
+        msg = (
+            f"<font color='blue'> ==== 施肥成功 </font>{str(i)}"
+            + "<font color='blue'> 好友 ====</font>\n"
+        )
         Feishu_SendCardMsg(bot_id, title, msg)
         print("==== 施肥成功 %d 好友 ====" % i)
         break
