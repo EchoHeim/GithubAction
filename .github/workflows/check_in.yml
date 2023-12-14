@@ -1,0 +1,52 @@
+name: 网站签到
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  # push:
+  #   branches: [ master ]
+  schedule:
+    - cron: "22 22 * * *"
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Runs a single command using the runners shell
+      - name: Set up Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.10.*
+
+      - name: Install requirements
+        run: |
+          pip install --upgrade pip
+          pip install -r ./ChromeSelenium/requirements.txt
+
+      - name: Prepare chromedriver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Configuration Environment
+        run: |
+          export DISPLAY=:99
+          chromedriver --url-base=/wd/hub &
+          sudo Xvfb -ac :99 -screen 0 1280x1024x24 > /dev/null 2>&1 & # optional
+
+      - name: Working
+        run: |
+          uname -a
+          python -B -m ChromeSelenium.Check-in.coarcade ${{ secrets.COARCADE_NAME }} ${{ secrets.COARCADE_PASSWD }} ${{ secrets.FEISHU_BOT_ID }}
+          # python -B -m ChromeSelenium.Check-in.JoinQuant ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
+          python -B -m ChromeSelenium.Check-in.fishpi ${{ secrets.FISHPI_USERNAME }} ${{ secrets.FISHPI_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
+          # python -B -m ChromeSelenium.Check-in.v2ex ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}

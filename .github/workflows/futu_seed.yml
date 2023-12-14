@@ -1,12 +1,13 @@
-name: futu_seed
+name: 富途种子
 
-# Controls when the action will run. 
+# Controls when the action will run.
 on:
   # Triggers the workflow on push or pull request events but only for the main branch
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    branches: [master]
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron: "44 2-22/4 * * *"
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -20,19 +21,30 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - name: Checkout
+      - name: 🛒 Checkout
         uses: actions/checkout@v2
 
+      - name: 🔎 Check IP
+        run: curl https://api.ipify.org
+
       # Runs a single command using the runners shell
-      - name: 'Set up Python'
+      - name: 🌠 Set up Python
         uses: actions/setup-python@v1
         with:
-           python-version: 3.10.6
-      - name: 'Install requirements'
-        run: pip install -r ./futu/requirements.txt
-      - name: 'Working'
+          python-version: 3.10.*
+
+      - name: 💈 Install requirements
+        run: pip install -r ./ChromeSelenium/requirements.txt
+
+      - name: ⏳ Prepare chromedriver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: 🪴 Configuration Environment
         run: |
-          sudo rm -fr /usr/bin/chromedriver
-          sudo cp -p ./selenium/chrome/chromedriver /usr/bin/
-          chmod -R 777 /usr/bin/chromedriver
-          python ./selenium/futu/futu_seed.py
+          export DISPLAY=:99
+          chromedriver --url-base=/wd/hub &
+          sudo Xvfb -ac :99 -screen 0 1280x1024x24 > /dev/null 2>&1 & # optional
+
+      - name: 🎐 Working
+        run: |
+          python -B -m ChromeSelenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
