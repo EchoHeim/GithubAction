@@ -47,6 +47,6 @@ jobs:
         run: |
           uname -a
           python -B -m ChromeSelenium.Check-in.coarcade ${{ secrets.COARCADE_NAME }} ${{ secrets.COARCADE_PASSWD }} ${{ secrets.FEISHU_BOT_ID }}
-          # python -B -m ChromeSelenium.Check-in.JoinQuant ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
+          python -B -m ChromeSelenium.Check-in.JoinQuant ${{ secrets.JQ_USERNAME }} ${{ secrets.JQ_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
           python -B -m ChromeSelenium.Check-in.fishpi ${{ secrets.FISHPI_USERNAME }} ${{ secrets.FISHPI_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
           # python -B -m ChromeSelenium.Check-in.v2ex ${{ secrets.V2EX_USERNAME }} ${{ secrets.V2EX_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}

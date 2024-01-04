@@ -20,7 +20,9 @@ class MonitorWeather:
         # if keyWord in json["results"][0]["daily"][daily]["text_day"] or keyWord in json["results"][0]["daily"][daily]["text_night"]:
         if minCode <= code_day <= maxCode or minCode <= code_night <= maxCode:
             dayText = f"{date}白天-" + json["results"][0]["daily"][daily]["text_day"]
-            nightText = f", {date}夜间-" + json["results"][0]["daily"][daily]["text_night"]
+            nightText = (
+                f", {date}夜间-" + json["results"][0]["daily"][daily]["text_night"]
+            )
             wendu = (
                 "，温度："
                 + json["results"][0]["daily"][daily]["low"]

@@ -81,7 +81,7 @@ for i in range(40):
             f"<font color='blue'> ==== 施肥成功 </font>{str(i)}"
             + "<font color='blue'> 好友 ====</font>\n"
         )
-        Feishu_SendCardMsg(bot_id, title, msg)
+        # Feishu_SendCardMsg(bot_id, title, msg)
         print("==== 施肥成功 %d 好友 ====" % i)
         break
 

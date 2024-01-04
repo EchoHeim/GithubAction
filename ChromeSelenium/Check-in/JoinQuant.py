@@ -49,9 +49,9 @@ try:
         By.XPATH, "/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]"
     ).click()
 
-    time.sleep(20)
+    time.sleep(10)
     num = browser.find_element(
-        By.XPATH, "/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]/span"
+        By.XPATH, "/html/body/section/main/div/div[2]/div[2]/div[1]/div[2]/span[2]"
     ).text
     print("\n---> JoinQuant: 当前积分 %d \n" % int(num))
     msg += "签到前 \n <font color='green'> 昨日积分: </font>" + str(num) + "\n"
