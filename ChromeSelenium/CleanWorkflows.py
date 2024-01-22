@@ -59,22 +59,27 @@ browser.find_element(By.XPATH, '//*[@id="actions-tab"]').click()  # Actions-tab
 time.sleep(8)
 
 browser.find_element(By.XPATH, '//*[@class="next_page"]').click()
-print("\n==== 下一页 ====\n")
+print("\n==== 第二页 ====\n")
 time.sleep(4)
 
 while True:
     try:
         browser.find_element(
-            By.XPATH, '//*[@aria-label="Show options"]'
-        ).click()  # 点击展开选项
+            By.XPATH,
+            "/html/body/div[1]/div[6]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]",
+        ).click()
+        print("==== 点击展开选项 ====\n")
         time.sleep(2)
 
-        browser.find_element(By.XPATH, '//*[@class="text-left"]').click()  # 删除
+        browser.find_element(By.XPATH, '//*[@class="text-left"]').click()
+        print("==== 删除 ====\n")
         time.sleep(4)
 
         browser.find_element(
-            By.XPATH, '//*[@role="dialog"]/div[3]/form/button/span/span'
-        ).click()  # 确认
+            By.XPATH,
+            "/html/body/div[1]/div[6]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]/details/ul/li[2]/div/modal-dialog/div[2]/form/button",
+        ).click()
+        print("==== 确认 ====\n")
         time.sleep(4)
 
         num = num + 1
