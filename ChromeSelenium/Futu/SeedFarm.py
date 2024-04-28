@@ -22,9 +22,8 @@ browser.get(website)
 time.sleep(4)
 print(browser.title)
 
-
 browser.find_element(
-    By.XPATH, "/html/body/div[1]/div[2]/div/div[2]/p[3]/a"
+    By.XPATH, "/html/body/div[1]/div[2]/div/div[2]/p[4]/a"
 ).click()  # 登录
 
 browser.find_element(
@@ -74,7 +73,9 @@ for i in range(40):
         time.sleep(4)
         browser.find_element(By.XPATH, '//*[@class="opIcon icon_fert"]').click()  # 浇水
         time.sleep(4)
-        browser.find_element(By.XPATH, '//*[@class="back-home"]/span').click()  # 返回好友列表
+        browser.find_element(
+            By.XPATH, '//*[@class="back-home"]/span'
+        ).click()  # 返回好友列表
         time.sleep(4)
     except Exception:
         msg = (
