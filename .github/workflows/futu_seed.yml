@@ -34,7 +34,9 @@ jobs:
           python-version: 3.10.*
 
       - name: 💈 Install requirements
-        run: pip install -r ./ChromeSelenium/requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ./ChromeSelenium/requirements.txt
 
       - name: ⏳ Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
