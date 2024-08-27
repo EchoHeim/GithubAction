@@ -66,18 +66,21 @@ while True:
     try:
         browser.find_element(
             By.XPATH,
-            "/html/body/div[1]/div[6]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]",
+            "/html/body/div[1]/div[5]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]",
         ).click()
         print("==== 点击展开选项 ====\n")
         time.sleep(2)
 
-        browser.find_element(By.XPATH, '//*[@class="text-left"]').click()
+        browser.find_element(
+            By.XPATH,
+            "/html/body/div[1]/div[5]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]/details/ul/li[2]/button",
+        ).click()
         print("==== 删除 ====\n")
         time.sleep(4)
 
         browser.find_element(
             By.XPATH,
-            "/html/body/div[1]/div[6]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]/details/ul/li[2]/div/modal-dialog/div[2]/form/button",
+            "/html/body/div[1]/div[5]/div/main/turbo-frame/div/split-page-layout/div/div/div[2]/div/div/div[2]/div[2]/div[1]/div/div[3]/div/div[2]/details/ul/li[2]/dialog-helper/dialog/div[2]/form/button/span/span",
         ).click()
         print("==== 确认 ====\n")
         time.sleep(4)
