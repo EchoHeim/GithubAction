@@ -23,7 +23,7 @@ time.sleep(4)
 print(browser.title)
 
 browser.find_element(
-    By.XPATH, "/html/body/div[1]/div[2]/div/div[2]/p[4]/a"
+    By.XPATH, "/html/body/div[1]/div[2]/div/div[2]/p[3]/a"
 ).click()  # 登录
 
 browser.find_element(
@@ -36,7 +36,9 @@ browser.find_element(
     By.XPATH, "/html/body/div[1]/div[2]/div/div[2]/form[1]/input"
 ).click()  # 下一步
 
-browser.find_element(By.XPATH, '//*[@id="app"]/div/form/div[2]/input').send_keys(
+browser.find_element(
+    By.XPATH, "/html/body/div[1]/div[2]/div/div[1]/div/form/div[1]/input"
+).send_keys(
     password
 )  # 输入密码
 
