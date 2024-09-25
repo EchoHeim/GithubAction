@@ -51,8 +51,10 @@ try:
         print("\n==== 种子已经喝饱了，不需要再浇水！ ====\n")
     else:
         num = int(num) - 1
+        browser.find_element(
+            By.XPATH, "/html/body/div[1]/div/div[2]/div[6]/div[7]/div/div[1]/canvas"
+        ).click()
         print("\n==== 给自己浇水, 剩余 %d 次 ====\n" % int(num))
-        browser.find_element(By.XPATH, '//*[@class="waterCanvas"]').click()
 except Exception:
     msg = "<font color='red'> 🎋 种子已成熟，需要重新播种！ </font>"
     Feishu_SendCardMsg(bot_id, title, msg)
