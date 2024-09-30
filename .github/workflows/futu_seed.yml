@@ -40,6 +40,9 @@ jobs:
 
       - name: ⏳ Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
+        with:
+          # Optional: do not specify to match Chrome's version
+          chromedriver-version: '129.0.6668.71'
 
       - name: 🪴 Configuration Environment
         run: |
