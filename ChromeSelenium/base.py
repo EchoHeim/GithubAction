@@ -12,6 +12,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 chrome_options = webdriver.ChromeOptions()
 
@@ -27,6 +28,13 @@ print("\n==== 环境检测 ====\n")
 def get_web_driver():
     service = Service()
     options = webdriver.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
+    options.add_argument("window-size=1920x1080")
+    options.add_argument("--disable-dev-shm-usage")
+    # 签到页通常包含统计、广告及长连接。导航发出后立即返回，由元素等待判断页面可用性，
+    # 避免 Chrome 因站点不触发 DOMContentLoaded 而卡满默认的 300 秒。
+    options.page_load_strategy = "none"
     if platform.system() == "Windows":
         print("\nCurrent Operating System: ==== Windows ====\n")
         browser = webdriver.Chrome(service=service, options=options)
@@ -34,16 +42,32 @@ def get_web_driver():
         print("\nCurrent Operating System: ==== Linux ====\n")
         chromedriver = "/usr/bin/chromedriver"
         os.environ["webdriver.chrome.driver"] = chromedriver
-        if "fv-az" in platform.node():  # github actions 服务器名
-            chrome_options.add_argument(
-                "--headless"
-            )  # 浏览器不提供可视化页面. linux下如果系统不支持可视化不加这条会启动失败
+        # CI 无桌面环境，强制无头模式。—— GitHub Actions 新运行器 hostname 不再是 fv-az-*，
+        # 旧逻辑按 "fv-az" 判断会漏掉 --headless，导致 Chrome 找显示器失败、启动即退出。
+        # 无头模式不依赖 Xvfb/显示器，最稳。
+        options.add_argument("--headless")
         browser = webdriver.Chrome(
-            chrome_options=chrome_options, executable_path=chromedriver
+            service=Service(executable_path=chromedriver), options=options
         )
 
+    browser.set_page_load_timeout(45)
     browser.implicitly_wait(10)  # 所有的操作都可以最长等待10s
     return browser
+
+
+def open_page(driver, url, timeout=45):
+    """打开页面；慢资源超时时保留已经加载完成、可交互的 DOM。"""
+    driver.set_page_load_timeout(timeout)
+    try:
+        driver.get(url)
+    except TimeoutException as exc:
+        print("[WARN] 页面加载超过 %ss，停止等待慢资源: %s" % (timeout, url))
+        try:
+            driver.execute_script("window.stop();")
+        except WebDriverException:
+            raise exc
+
+        # 即使导航尚未提交也交给调用方的元素等待处理；部分站点会在此后才完成跳转。
 
 
 def checkPlatformInfo():

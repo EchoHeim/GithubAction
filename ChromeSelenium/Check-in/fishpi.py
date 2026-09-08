@@ -20,21 +20,93 @@ password = sys.argv[2]  # 登录密码
 website = "https://fishpi.cn/login?goto=https%3A%2F%2Ffishpi.cn%2F"
 
 driver = get_web_driver()
-driver.get(website)
+open_page(driver, website)
 time.sleep(4)
 print(driver.title)
 
 try:
-    driver.find_element(By.XPATH, '//*[@autofocus="autofocus"]').send_keys(username)
-    driver.find_element(By.XPATH, '//*[@type="password"]').send_keys(password)
-    driver.find_element(By.XPATH, "/html/body/div[3]/div/div[1]/div/button[1]").click()
-    time.sleep(4)
+    WebDriverWait(driver, 20).until(
+        EC.visibility_of_element_located((By.ID, "nameOrEmail"))
+    ).send_keys(username)
+    driver.find_element(By.ID, "loginPassword").send_keys(password)
+    WebDriverWait(driver, 30).until(
+        lambda current: current.execute_script(
+            "return typeof window.Verify === 'object' "
+            "&& typeof window.Verify.login === 'function';"
+        )
+    )
+    WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable(
+            (By.XPATH, "//button[contains(@onclick, 'Verify.login')]")
+        )
+    ).click()
+
+    # 登录成功后首页至少会出现奖励入口或聊天室；停留在登录/访客验证页不算成功。
+    WebDriverWait(driver, 20).until(
+        lambda current: current.find_elements(By.ID, "yesterdayImg")
+        or current.find_elements(By.ID, "chatRoomInput")
+    )
+    print("fishpi - 登录成功")
 
     print("---> 领取昨日奖励")
     driver.find_element(By.XPATH, '//*[@id="yesterdayImg"]').click()
     time.sleep(2)
-except Exception:
-    print("fishpi - 领取昨日奖励失败")
+except Exception as exc:
+    print(
+        "fishpi - 登录或领取昨日奖励失败: %s (title=%s url=%s)"
+        % (exc, driver.title, driver.current_url)
+    )
+    print("===== FISHPI LOGIN STRUCTURE =====")
+    for index, element in enumerate(driver.find_elements(By.CSS_SELECTOR, "input")):
+        print(
+            "input#%d id=%r type=%r placeholder=%r visible=%s"
+            % (
+                index,
+                element.get_attribute("id"),
+                element.get_attribute("type"),
+                element.get_attribute("placeholder"),
+                element.is_displayed(),
+            )
+        )
+    for index, element in enumerate(driver.find_elements(By.CSS_SELECTOR, "button")):
+        print(
+            "button#%d text=%r onclick=%r visible=%s"
+            % (
+                index,
+                element.text,
+                element.get_attribute("onclick"),
+                element.is_displayed(),
+            )
+        )
+    for index, frame in enumerate(driver.find_elements(By.CSS_SELECTOR, "iframe")):
+        print(
+            "iframe#%d title=%r src=%r visible=%s"
+            % (
+                index,
+                frame.get_attribute("title"),
+                frame.get_attribute("src"),
+                frame.is_displayed(),
+            )
+        )
+    for selector in (
+        "#loginTip",
+        "#captcha",
+        "[class*='captcha']",
+        "[class*='geetest']",
+        "[class*='verify']",
+    ):
+        for index, element in enumerate(driver.find_elements(By.CSS_SELECTOR, selector)):
+            print(
+                "state selector=%r index=%d text=%r class=%r visible=%s"
+                % (
+                    selector,
+                    index,
+                    element.text,
+                    element.get_attribute("class"),
+                    element.is_displayed(),
+                )
+            )
+    print("===== END FISHPI LOGIN STRUCTURE =====")
 
 try:
     print("---> 聊天发言 1")

@@ -8,6 +8,8 @@ __pycache__/
 # C extensions
 *.so
 
+futu-debug/
+
 # Distribution / packaging
 .Python
 build/

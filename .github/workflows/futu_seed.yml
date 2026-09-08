@@ -40,9 +40,6 @@ jobs:
 
       - name: ⏳ Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
-        with:
-          # Optional: do not specify to match Chrome's version
-          chromedriver-version: '129.0.6668.71'
 
       - name: 🪴 Configuration Environment
         run: |
@@ -51,5 +48,22 @@ jobs:
           sudo Xvfb -ac :99 -screen 0 1280x1024x24 > /dev/null 2>&1 & # optional
 
       - name: 🎐 Working
+        continue-on-error: true
         run: |
-          python -B -m ChromeSelenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }}
+          echo "chrome: $(google-chrome --version 2>/dev/null || google-chrome-stable --version 2>/dev/null || echo 'chrome not found')"
+          echo "chromedriver: $(chromedriver --version 2>/dev/null || echo 'chromedriver not found')"
+          python -B -m ChromeSelenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }} && echo "PY_OK=true" >> $GITHUB_ENV || echo "PY_FAILED=true" >> $GITHUB_ENV
+
+      - name: 📦 Upload debug artifacts
+        if: always() && env.PY_FAILED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: futu-debug
+          path: |
+            /tmp/futu_*.png
+            /tmp/futu_*.html
+          if-no-files-found: ignore
+
+      - name: 🚨 Fail if python failed
+        if: env.PY_FAILED == 'true'
+        run: exit 1

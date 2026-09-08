@@ -19,7 +19,7 @@ bot_id = sys.argv[3]  # 机器人编号
 website = "https://www.joinquant.com/user/login/index?type=login"
 
 browser = get_web_driver()
-browser.get(website)
+open_page(browser, website)
 time.sleep(4)
 print(browser.title)
 
