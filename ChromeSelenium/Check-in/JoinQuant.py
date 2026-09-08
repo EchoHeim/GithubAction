@@ -9,6 +9,7 @@ print("当前脚本所在文件夹路径:", current_folder)
 sys.path.append("current_folder/../")  # 添加自定义模块路径
 from ChromeSelenium.base import *
 from Messaging.Msg import *
+import requests
 
 
 username = sys.argv[1]  # 登录账号
@@ -22,6 +23,43 @@ browser = get_web_driver()
 open_page(browser, website)
 time.sleep(4)
 print(browser.title)
+
+
+def probe_login_api():
+    """网页被地区页替换时，确认聚宽登录接口是否仍可从 Runner 访问。"""
+    response = requests.post(
+        "https://www.joinquant.com/user/login/doLoginByText",
+        data={"username": username, "pwd": password},
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/152 Safari/537.36"
+            ),
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": website,
+        },
+        timeout=20,
+        allow_redirects=False,
+    )
+    print(
+        "JoinQuant API probe: http=%s content-type=%s"
+        % (response.status_code, response.headers.get("content-type", ""))
+    )
+    try:
+        payload = response.json()
+    except ValueError:
+        print("JoinQuant API probe: non-json response")
+        return
+
+    print(
+        "JoinQuant API probe: code=%r msg=%r"
+        % (payload.get("code"), str(payload.get("msg", ""))[:120])
+    )
+
+
+if "当前地区暂不支持访问" in browser.find_element(By.TAG_NAME, "body").text:
+    print("JoinQuant 网页入口被 Runner 出口地区限制，探测后台登录接口")
+    probe_login_api()
 
 title = " JoinQuant "
 msg = ""
