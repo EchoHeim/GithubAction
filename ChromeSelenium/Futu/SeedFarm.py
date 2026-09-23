@@ -2,6 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # sourcery skip: avoid-builtin-shadow
+import json
 import sys
 
 from ChromeSelenium.base import *
@@ -228,30 +229,243 @@ def login(browser):
     return browser
 
 
-def farm(browser):
-    # 外层 opBtnBox 初始为 display:none，由 Angular 指令在数据就绪后处理。
-    # Selenium 的可见性判断在 headless 环境里不可靠，因此等待次数插值完成，
-    # 再触发页面自身 ng-click="water()" 所在的节点。
-    def ready_water_control(d):
-        for button in d.find_elements(By.CSS_SELECTOR, ".opBtn.waterBtn"):
-            try:
-                badge = button.find_element(By.CSS_SELECTOR, ".water_num")
-                raw_count = (badge.get_attribute("textContent") or "").strip()
-                if raw_count.isdigit():
-                    return button, int(raw_count)
-            except Exception:
-                continue
-        return False
+# ---------- 种子成熟检测 ----------
+# 生长期气泡文案为「生命剩下X天Y小时」（见截图），成熟后气泡会换成收获类文案、
+# 并出现「收获」按钮。页面由 Angular 渲染，类名可能随版本变动，因此同时用三类信号
+# 判定：收获类元素可见 / 成熟关键词文案 / 生命时长归零。命中任一即视为成熟。
+HARVEST_SELECTORS = [
+    "[class*='harvest']",
+    "[class*='Harvest']",
+    "[class*='mature']",
+    "[class*='Mature']",
+    "[class*='shouhuo']",
+    ".opBtn.harvestBtn",
+]
+MATURE_KEYWORDS = ["已成熟", "成熟了", "可收获", "立即收获", "去收获", "采摘", "可以收获"]
+
+# 一次 JS 扫描拿全：成熟信号 + 生命时长气泡 + 今日剩余浇水次数
+FARM_PROBE_JS = r"""
+var out = {mature: false, evidence: [], hints: [], life: '', waterCount: null};
+var body = document.body;
+if (!body) { return out; }
+var text = body.innerText || '';
+
+// 1) 生命时长气泡：生长期形如「生命剩下4天09小时」，归零即成熟
+var m = text.match(/生命剩下\s*(\d+)\s*天\s*(\d+)\s*小时/);
+if (m) {
+    out.life = m[0].replace(/\s+/g, '');
+    if (parseInt(m[1], 10) === 0 && parseInt(m[2], 10) === 0) {
+        out.mature = true;
+        out.evidence.push('life-zero:' + out.life);
+    }
+}
+
+// 2) 收获类控件可见 => 成熟
+var sels = %(sels)s;
+for (var i = 0; i < sels.length && !out.mature; i++) {
+    var els = document.querySelectorAll(sels[i]);
+    for (var j = 0; j < els.length; j++) {
+        var el = els[j];
+        if (el.offsetParent === null) { continue; }
+        out.mature = true;
+        out.evidence.push('selector:' + sels[i] + '|' + (el.innerText || '').trim().slice(0, 20));
+        break;
+    }
+}
+
+// 3) 文案兜底
+if (!out.mature) {
+    var kws = %(kws)s;
+    for (var k = 0; k < kws.length; k++) {
+        if (text.indexOf(kws[k]) !== -1) {
+            out.mature = true;
+            out.evidence.push('keyword:' + kws[k]);
+            break;
+        }
+    }
+}
+
+// 4) 采集相关文案，便于失败时反推选择器
+var nodes = document.querySelectorAll('body *');
+var seen = 0;
+for (var p = 0; p < nodes.length && seen < 6; p++) {
+    var n = nodes[p];
+    if (n.children.length > 0) { continue; }
+    var t = (n.innerText || '').trim();
+    if (!t || t.length > 24) { continue; }
+    if (/生命剩下|成熟|收获|采摘|浇水/.test(t)) {
+        out.hints.push((n.className || n.tagName) + '|' + t);
+        seen++;
+    }
+}
+
+// 5) 今日剩余浇水次数
+var badges = document.querySelectorAll('.opBtn.waterBtn .water_num');
+for (var b = 0; b < badges.length; b++) {
+    var raw = (badges[b].textContent || '').trim();
+    if (/^\d+$/.test(raw)) { out.waterCount = parseInt(raw, 10); break; }
+}
+return out;
+""" % {
+    "sels": json.dumps(HARVEST_SELECTORS),
+    "kws": json.dumps(MATURE_KEYWORDS, ensure_ascii=False),
+}
+
+
+def probe_farm(browser):
+    """扫描农场当前状态；脚本注入失败时返回保守默认值，不中断主流程。"""
+    try:
+        return browser.execute_script(FARM_PROBE_JS) or {}
+    except Exception as e:
+        print("[WARN] 农场状态扫描失败:", e)
+        return {
+            "mature": False,
+            "evidence": [],
+            "hints": [],
+            "life": "",
+            "waterCount": None,
+        }
+
+
+def inspect_seed(browser, timeout=30):
+    """等待农场数据就绪（浇水次数插值完成）或种子成熟，返回最终状态。"""
+    deadline = time.time() + timeout
+    state = probe_farm(browser)
+    while time.time() < deadline:
+        if state.get("mature") or state.get("waterCount") is not None:
+            return state
+        time.sleep(1)
+        state = probe_farm(browser)
+    state["timeout"] = True
+    return state
+
+
+def find_water_button(driver):
+    """取带数字徽标的那颗浇水按钮，保持与旧逻辑一致的匹配口径。"""
+    for button in driver.find_elements(By.CSS_SELECTOR, ".opBtn.waterBtn"):
+        try:
+            badge = button.find_element(By.CSS_SELECTOR, ".water_num")
+            raw_count = (badge.get_attribute("textContent") or "").strip()
+            if raw_count.isdigit():
+                return button
+        except Exception:
+            continue
+    return None
+
+
+def notify_seed_matured(browser, state):
+    """种子成熟 -> 单独推送一条飞书提醒；推送/截图失败都不阻断后续好友操作。"""
+    life = state.get("life") or "未知"
+    evidence = " / ".join(state.get("evidence") or [])[:180] or "收获控件出现"
+    print("\n==== [成熟] 种子已成熟 ==== life=%s evidence=%s\n" % (life, evidence))
+    print("[LOG] 页面线索: %s" % (state.get("hints") or []))
 
     try:
-        water_button, before_count = WebDriverWait(browser, 30).until(
-            ready_water_control
-        )
-    except Exception as e:
-        raise AssertionError("农场数据加载超时，无法读取今日剩余浇水次数") from e
+        dump_debug(browser, "mature")
+    except Exception as e:  # noqa
+        print("[WARN] 成熟截图失败:", e)
+
+    msg = (
+        "<font color='red'> 🌾 种子已成熟，记得上线收获！ </font>\n"
+        "<font color='grey'> ⏳ 生命时长：%s </font>\n" % life
+        + "<font color='grey'> 🔎 判定依据：%s </font>" % evidence
+    )
+    try:
+        Feishu_SendCardMsg(bot_id, title + "｜成熟提醒", msg)
+    except Exception as e:  # 网络抖动不能拖垮浇水主流程
+        print("[WARN] 成熟提醒发送失败（继续给好友浇水）:", e)
+
+
+OVERLAY_SELECTORS = [
+    "[class*='mask']",
+    "[class*='Mask']",
+    "[class*='modal']",
+    "[class*='dialog']",
+    "[class*='popup']",
+    "[class*='pop-layer']",
+]
+OVERLAY_CLOSE_TEXTS = ["我知道了", "知道啦", "知道了", "确定", "关闭", "稍后再说"]
+
+
+def dismiss_overlay(browser):
+    """成熟后页面常弹「可收获」浮层，会挡住「互动 / 施肥」的点击。
+    只做温和处理：先按 ESC，再点浮层内的关闭类控件；失败一律不抛错。"""
+    try:
+        # 只认「内容与成熟/关闭相关」的浮层：页面上长期存在的背景 mask 不能被误点。
+        mask = None
+        for sel in OVERLAY_SELECTORS:
+            for el in browser.find_elements(By.CSS_SELECTOR, sel):
+                try:
+                    if not el.is_displayed():
+                        continue
+                    label = (el.text or "").strip()
+                except Exception:
+                    continue
+                if any(k in label for k in MATURE_KEYWORDS) or any(
+                    t in label for t in OVERLAY_CLOSE_TEXTS
+                ):
+                    mask = el
+                    break
+            if mask is not None:
+                break
+        if mask is None:
+            return False
+
+        print("[LOG] 检测到浮层，尝试关闭")
+        try:
+            ActionChains(browser).send_keys(Keys.ESCAPE).perform()
+            time.sleep(1)
+        except Exception:
+            pass
+        for text in OVERLAY_CLOSE_TEXTS:
+            # 只点标签级控件；不用 div，避免命中包裹整个弹层的大容器
+            for tag in ("a", "button", "span"):
+                try:
+                    el = mask.find_element(
+                        By.XPATH,
+                        ".//%s[contains(normalize-space(.),'%s')]" % (tag, text),
+                    )
+                    if el.is_displayed():
+                        el.click()
+                        print("[LOG] 已关闭浮层: %s" % text)
+                        time.sleep(1)
+                        return True
+                except Exception:
+                    continue
+        return False
+    except Exception as e:  # 关不掉也要继续走好友流程
+        print("[WARN] 关闭浮层失败（忽略）:", e)
+        return False
+
+
+def farm(browser):
+    # 外层 opBtnBox 初始为 display:none，由 Angular 指令在数据就绪后处理。
+    # Selenium 的可见性判断在 headless 环境里不可靠，因此直接扫描页面状态：
+    # 既能读到今日剩余浇水次数，也能识别「种子已成熟」——成熟时页面通常没有浇水入口，
+    # 旧逻辑会在这里超时抛错，把后面的好友互动整段跳过，所以必须先判定再决定是否浇水。
+    state = inspect_seed(browser)
+    matured = bool(state.get("mature"))
+    if matured:
+        notify_seed_matured(browser, state)
+
+    before_count = state.get("waterCount")
+    water_button = None
+    if not matured:
+        if before_count is None:
+            raise AssertionError(
+                "农场数据加载超时：未检测到成熟信号，也读不到今日剩余浇水次数 %s"
+                % (state.get("hints") or [])
+            )
+        water_button = find_water_button(browser)
 
     watered = False
-    if before_count > 0:
+    if matured:
+        print("\n==== 种子已成熟，跳过自家浇水，直接去好友列表 ====\n")
+    elif before_count > 0:
+        if water_button is None:
+            water_button = find_water_button(browser)
+        if water_button is None:
+            raise AssertionError("今日仍有 %d 次浇水机会，但找不到浇水按钮" % before_count)
         browser.execute_script("arguments[0].click();", water_button)
 
         def water_count_decreased(d):
@@ -274,6 +488,9 @@ def farm(browser):
         print("\n==== 今日浇水次数已用完，继续检查可施肥好友 ====\n")
 
     time.sleep(4)
+
+    if matured:
+        dismiss_overlay(browser)
 
     print("==== 进入好友列表 ====\n")
     try:
@@ -322,7 +539,12 @@ def farm(browser):
                 "给第 %d 位好友施肥时失败" % (fertilized + 1)
             ) from e
 
-    water_summary = "💧 已给当前种子浇水" if watered else "💧 今日浇水次数已用完"
+    if matured:
+        water_summary = "🌾 种子已成熟，本次未浇水（已单独发飞书提醒）"
+    elif watered:
+        water_summary = "💧 已给当前种子浇水"
+    else:
+        water_summary = "💧 今日浇水次数已用完"
     msg = (
         "<font color='green'> %s </font>\n" % water_summary
         + "<font color='blue'> 🌱 已给 %d 位好友施肥 </font>" % fertilized
