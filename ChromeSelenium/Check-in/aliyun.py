@@ -40,10 +40,10 @@ try:
     browser.find_element(By.XPATH, '//*[@id="login"]/div/form/button').click()  # 安全登录按钮
 
     time.sleep(4)
-    print("\n===> Coarcade 登录成功!")
+    print("\n===> 阿里云盘 登录成功!")
 
 except Exception:
-    print("\n===> Coarcade 登录失败!")
+    print("\n===> 阿里云盘 登录失败!")
     str += "\n > ---- 登录失败! ----"
 
 try:
@@ -58,7 +58,7 @@ try:
 
 
 except Exception:
-    print("\n===> Coarcade 签到失败!")
+    print("\n===> 阿里云盘 签到失败!")
     str += "\n > ---- 签到失败! ----"
 
 try:

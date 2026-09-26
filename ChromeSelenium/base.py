@@ -1,3 +1,5 @@
+import io
+
 from PIL import Image
 import cv2, numpy as np
 import os, sys, time, ddddocr, requests, platform, traceback
@@ -12,15 +14,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException, WebDriverException
-
-chrome_options = webdriver.ChromeOptions()
-
-chrome_options.add_argument("--no-sandbox")  # 解决DevToolsActivePort文件不存在的报错
-chrome_options.add_argument("--disable-gpu")  # 谷歌文档提到需要加上这个属性来规避bug
-
-chrome_options.add_argument("window-size=1920x1080")  # 指定浏览器分辨率
-chrome_options.add_argument("--disable-dev-shm-usage")
+from selenium.common.exceptions import (
+    TimeoutException,
+    WebDriverException,
+    StaleElementReferenceException,
+    NoSuchElementException,
+)
 
 print("\n==== 环境检测 ====\n")
 
@@ -32,11 +31,28 @@ def get_web_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("window-size=1920x1080")
     options.add_argument("--disable-dev-shm-usage")
+    # 抹掉 Selenium 的自动化指纹。V2EX 这类站点会据此判定机器人，
+    # 轻则弹 Cloudflare 校验，重则把请求直接挡在验证码之前。
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
     # 签到页通常包含统计、广告及长连接。导航发出后立即返回，由元素等待判断页面可用性，
     # 避免 Chrome 因站点不触发 DOMContentLoaded 而卡满默认的 300 秒。
     options.page_load_strategy = "none"
+    # 本机跑时指向固定的 user-data-dir，把登录 cookie 留住。
+    # 聚宽登录带风控滑块，每次冷启动都重新登录等于每天都去撞验证码；
+    # 留着会话上下文就能直接跳过登录这关。CI 上不设这个变量，行为不变。
+    profile_dir = os.environ.get("CHECKIN_PROFILE_DIR")
+    if profile_dir:
+        os.makedirs(profile_dir, exist_ok=True)
+        print("\n[INFO] 使用持久化浏览器 profile: %s\n" % profile_dir)
+        options.add_argument("--user-data-dir=%s" % os.path.abspath(profile_dir))
     if platform.system() == "Windows":
         print("\nCurrent Operating System: ==== Windows ====\n")
+        # 本机定时跑时设 CHECKIN_HEADLESS=1，免得每天弹一个浏览器窗口。
+        # 默认仍有头：无头更容易被风控盯上，本地跑不差这几分钟。
+        if os.environ.get("CHECKIN_HEADLESS") == "1":
+            options.add_argument("--headless")
         browser = webdriver.Chrome(service=service, options=options)
     elif platform.system() == "Linux":
         print("\nCurrent Operating System: ==== Linux ====\n")
@@ -49,6 +65,17 @@ def get_web_driver():
         browser = webdriver.Chrome(
             service=Service(executable_path=chromedriver), options=options
         )
+
+    # 补一刀：抹掉 navigator.webdriver。旧版 chromedriver 可能不认这条 CDP 命令，失败不影响主流程。
+    try:
+        browser.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {
+                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+            },
+        )
+    except WebDriverException as err:
+        print("[WARN] 注入反自动化脚本失败（不影响主流程）: %s" % err)
 
     browser.set_page_load_timeout(45)
     browser.implicitly_wait(10)  # 所有的操作都可以最长等待10s
@@ -99,23 +126,268 @@ def is_visible(driver, locator, timeout=10):
         return False
 
 
-def Ocr_Captcha(driver, locator, img_path):  # 验证码识别
-    # propertery = driver.find_element_by_xpath(locator)
-    propertery = driver.find_element(By.XPATH, '//*[@id="captcha-image"]')
-    driver.save_screenshot(img_path)
-    img = Image.open(img_path)
-    location = propertery.location
-    size = propertery.size
-    left = location["x"]
-    top = location["y"]
-    right = left + size["width"]
-    bottom = top + size["height"]
-    image = img.crop((left, top, right, bottom))  # 左、上、右、下
-    image.save(img_path)
-    ocr = ddddocr.DdddOcr()
-    with open(img_path, "rb") as f:
-        img_bytes = f.read()
-    return ocr.classification(img_bytes)
+# ⚠️ V2EX 按 Accept-Language 切换界面文案：中文是「用户名或电子邮件地址」/
+# 「请输入上图中的验证码，点击可以更换图片」，英文是 "Username or Email" /
+# "Enter the code above, click to change"。
+# GitHub Actions 跑在海外 IP 上，拿到的是**英文界面** —— 只认中文 placeholder 的选择器会全部落空。
+# 所以每组都配「文案选择器 + 结构化兜底」，后者靠密码框当锚点，与语言无关：
+#   文档顺序为  搜索框 → 用户名 → 密码 → 验证码 → 提交
+#   preceding 轴是反文档序，[1] 即密码框之前最近的那个文本框，正好落在用户名框
+#   following 轴同理，[1] 落在密码框之后的验证码框
+USERNAME_XPATHS = (
+    "//*[@placeholder='用户名或电子邮件地址']",
+    "//*[@placeholder='Username or Email']",
+    "//input[@type='password']/preceding::input[@type='text' or @type='email'][1]",
+)
+
+CAPTCHA_INPUT_XPATHS = (
+    "//*[@placeholder='请输入上图中的验证码，点击可以更换图片']",
+    "//*[@placeholder='Enter the code above, click to change']",
+    "//input[@type='password']/following::input[@type='text'][1]",
+)
+
+# 验证码图片元素的候选定位，按优先级排列：
+#   1) edge.v2ex.com 新站——独立的 <img id="captcha-image" src=".../_captcha">
+#   2) v2ex.com 老站——验证码是 input 自身的 inline background-image
+#   3) 其余按 id/class/src 含 captcha 兜底
+# 刻意不加「任意带 background-image 的元素」这种兜底：页面上的 Logo、区块阴影、
+# 提交按钮都带 background-image，匹配到就是截一坨无关像素去喂 OCR，还不如直接报错。
+CAPTCHA_IMG_XPATHS = (
+    "//*[@id='captcha-image']",
+    "//input[starts-with(@style,'background-image')]",
+    "//img[contains(@src,'captcha')]",
+    "//*[contains(@id,'captcha') or contains(@class,'captcha')]",
+)
+
+_ocr_cache = {}
+
+
+# ddddocr 加载 onnx 模型耗时约 1~2s，按模型种类各缓存一份实例。
+# 旧版（<=1.4.7）不认识 beta / show_ad 参数，逐级剔除后降级。
+def _build_ocr(beta):
+    candidates = [{"show_ad": False}, {}]
+    if beta:
+        candidates = [{"beta": True, "show_ad": False}, {"beta": True}] + candidates
+    for kwargs in candidates:
+        try:
+            return ddddocr.DdddOcr(**kwargs)
+        except TypeError:
+            continue
+    raise RuntimeError("ddddocr 初始化失败：没有可用的参数组合")
+
+
+def get_ocr(beta=True):
+    """按模型种类取 ddddocr 单例。
+
+    加载 onnx 模型约 1~2s，所以按模型种类各缓存一份，别每次调用都新建实例。
+
+    注意：默认模型和 beta 模型在 V2EX 验证码上**都不可靠**，各自准确率约 15%，
+    没有谁明显更强（2026-09-26 采 20 张真实样本核对真值）。真正有用的是
+    「两者结果一致时 2/2 全对」——所以别单独用某个模型，用 Ocr_Captcha_Vote。
+    """
+    key = bool(beta)
+    if key not in _ocr_cache:
+        _ocr_cache[key] = _build_ocr(key)
+    return _ocr_cache[key]
+
+
+def find_visible(driver, xpaths, min_width=0):
+    """按候选 xpath 依次找第一个可见元素，返回 (element, 命中的 xpath)。
+
+    找不到返回 (None, None)，不抛异常——调用方自己决定是重试还是报错。
+    """
+    for xpath in xpaths:
+        try:
+            elements = driver.find_elements(By.XPATH, xpath)
+        except WebDriverException:
+            continue
+        for element in elements:
+            try:
+                if element.is_displayed() and element.size["width"] >= min_width:
+                    return element, xpath
+            except (StaleElementReferenceException, WebDriverException):
+                continue
+    return None, None
+
+
+def wait_url(driver, needle, timeout=20):
+    """等 current_url 命中关键字，命中返回 True。
+
+    get_web_driver() 设了 page_load_strategy="none"，driver.get() 会立刻返回，
+    此刻 DOM 很可能还是上一个页面。不等 URL 落地就查元素，查到的是「上一个页面」，
+    点了也白点 —— 别用宽泛的选择器掩盖这个问题。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if needle in (driver.current_url or ""):
+                return True
+        except WebDriverException:
+            pass
+        time.sleep(0.3)
+    try:
+        current = driver.current_url
+    except WebDriverException:
+        current = "(读不到)"
+    print("[WARN] 等待 %ss 后 URL 仍未命中 %r，当前: %s" % (timeout, needle, current))
+    return False
+
+
+def wait_visible(driver, xpaths, timeout=15, label="元素"):
+    """等候选 xpath 里出现可见元素，返回 (element, 命中的 xpath)；超时返回 (None, None)。
+
+    命中兜底选择器时打日志 —— 那是「界面文案又变了」的信号，不是正常情况。
+    """
+    deadline = time.time() + timeout
+    while True:
+        element, xpath = find_visible(driver, xpaths)
+        if element is not None:
+            if xpath != xpaths[0]:
+                print("[INFO] %s 由兜底选择器命中: %s" % (label, xpath))
+            return element, xpath
+        if time.time() >= deadline:
+            return None, None
+        time.sleep(0.3)
+
+
+def find_captcha_input(driver, timeout=15):
+    """等验证码输入框出现，并返回它。"""
+    element, _ = wait_visible(driver, CAPTCHA_INPUT_XPATHS, timeout, "验证码输入框")
+    if element is None:
+        raise TimeoutException(
+            "未定位到验证码输入框（已尝试 %d 种选择器，界面文案可能又变了）"
+            % len(CAPTCHA_INPUT_XPATHS)
+        )
+    return element
+
+
+def find_captcha_element(driver, timeout=10):
+    """定位验证码图片元素，兼容「背景图 input」和「独立 img」两种形态。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for xpath in CAPTCHA_IMG_XPATHS:
+            try:
+                for element in driver.find_elements(By.XPATH, xpath):
+                    size = element.size
+                    if (
+                        element.is_displayed()
+                        and size["width"] >= 40
+                        and size["height"] >= 20
+                    ):
+                        if xpath != CAPTCHA_IMG_XPATHS[0]:
+                            print("[INFO] 验证码图由兜底选择器命中: %s" % xpath)
+                        return element
+            except (StaleElementReferenceException, NoSuchElementException, WebDriverException):
+                continue
+        time.sleep(0.3)
+    raise TimeoutException("未定位到验证码图片元素（已尝试 %d 种选择器）" % len(CAPTCHA_IMG_XPATHS))
+
+
+def _save_img(img_path, img_bytes):
+    """留存验证码原图。
+
+    只是排查用的副产物，写不进去也不该拖垮登录流程——目录缺失、路径非法都只告警。
+    """
+    if not img_path:
+        return
+    try:
+        parent = os.path.dirname(img_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(img_path, "wb") as f:
+            f.write(img_bytes)
+    except OSError as err:
+        print("[WARN] 保存验证码图失败 %s: %s" % (img_path, err))
+
+
+def _capture_captcha(driver, locator=None):
+    """取出验证码图的 element 与其 PNG 字节。优先用传入的 locator，失效则自动定位。"""
+    element = None
+    if locator:
+        try:
+            element = driver.find_element(By.XPATH, locator)
+            if not element.is_displayed() or element.size["width"] < 40:
+                element = None
+        except (NoSuchElementException, StaleElementReferenceException, WebDriverException):
+            element = None
+    if element is None:
+        element = find_captcha_element(driver)
+    return element, element.screenshot_as_png
+
+
+def Ocr_Captcha(driver, locator=None, img_path=None, beta=True):  # 验证码识别
+    """截取验证码图并 OCR，返回单个模型的识别结果。
+
+    用元素级截图（element.screenshot_as_png）取代「全屏截图 + 坐标裁剪」：
+    后者在页面滚动过、或浏览器缩放档位不是 100% 时，location 与位图会错位，
+    裁出来的往往是一块白底，OCR 自然识别不出。
+
+    单模型结果不可信（准确率约 15%），实际登录请用 Ocr_Captcha_Vote。
+    """
+    _, img_bytes = _capture_captcha(driver, locator)
+    _save_img(img_path, img_bytes)
+    return get_ocr(beta).classification(img_bytes)
+
+
+def _capture_changed(driver, locator, previous, tries=6):
+    """取验证码位图，并保证它与 previous 不同（换图后要等新图真的到）。
+
+    返回 (element, img_bytes, ok)。ok=False 表示连续点击后位图仍未变——
+    再往下跑只会把同一张图重复识别，结果必然一样，没有意义。
+    """
+    element, img_bytes = _capture_captcha(driver, locator)
+    if previous is None or img_bytes != previous:
+        return element, img_bytes, True
+
+    for _ in range(tries):
+        try:
+            element.click()
+        except WebDriverException:
+            pass
+        time.sleep(0.8)
+        element, img_bytes = _capture_captcha(driver, locator)
+        if img_bytes != previous:
+            return element, img_bytes, True
+    return element, img_bytes, False
+
+
+def Ocr_Captcha_Vote(driver, locator=None, img_path=None, max_rounds=12):
+    """多轮换图，直到默认模型与 beta 模型给出一致结果才采信，返回识别文本。
+
+    实测（2026-09-26 采 20 张真实样本核对真值）：
+      - 两个模型单独用都靠不住，准确率各约 15%（`TKMGF`→`tkMcf`、`UDUOVI`→`duovi`）；
+      - 但**两者结果一致时 2/2 全对** —— 一致性是可信度信号，不是准确率信号；
+      - 原始一致率只有约 10%，所以轮数必须够多。换图不计入站点的登录失败次数，很划算。
+    轮次用尽仍不一致时返回 None，表示「没拿到可信结果」。由调用方决定重来还是放弃，
+    但**绝不把存疑结果提交上去** —— 提交错误验证码才会消耗登录失败次数。
+
+    max_rounds=12 时，单轮拿到可信验证码的概率约 72%（1-0.9^12）。
+    """
+    previous = None
+    for round_no in range(1, max_rounds + 1):
+        element, img_bytes, ok = _capture_changed(driver, locator, previous)
+        if not ok:
+            print("===> 反复点击后验证码图仍未刷新，停止本轮投票")
+            return None
+        previous = img_bytes
+
+        round_path = None
+        if img_path:
+            stem, ext = os.path.splitext(img_path)
+            round_path = "%s_r%02d%s" % (stem, round_no, ext)
+        _save_img(round_path or img_path, img_bytes)
+
+        normal = get_ocr(False).classification(img_bytes)
+        beta = get_ocr(True).classification(img_bytes)
+        print("===> 第 %d/%d 轮识别: 默认=%r beta=%r" % (round_no, max_rounds, normal, beta))
+
+        # 长度过短说明两个模型都识别成了碎片，即便巧合一致也不可信
+        if normal and len(normal) >= 4 and normal.lower() == beta.lower():
+            print("===> 两模型一致，采信: %r" % normal)
+            return normal
+
+    print("===> %d 轮均未取得一致结果，放弃本轮提交" % max_rounds)
+    return None
 
 
 class Track(object):

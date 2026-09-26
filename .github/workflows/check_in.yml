@@ -17,9 +17,7 @@ on:
         type: choice
         options:
           - all
-          - coarcade
-          - joinquant
-          - fishpi
+          - v2ex
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -27,7 +25,9 @@ jobs:
   build:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 → 20：原来是被 FishPi 的 30 分钟睡眠撑起来的，FishPi 禁用后
+    # 只剩 V2EX（自带 12 分钟上限）+ 环境准备，20 分钟留了足够余量。
+    timeout-minutes: 20
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -46,31 +46,45 @@ jobs:
           pip install --upgrade pip
           pip install -r ./ChromeSelenium/requirements.txt
 
+      - name: Install system libs
+        # opencv-python 需要 libGL，无头 Linux runner 上缺它会 import cv2 直接失败
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
 
-      - name: Check in Coarcade
-        if: ${{ github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'coarcade' }}
-        env:
-          CHECKIN_USERNAME: ${{ secrets.COARCADE_NAME }}
-          CHECKIN_PASSWORD: ${{ secrets.COARCADE_PASSWD }}
-          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
-        run: |
-          uname -a
-          python -B -m ChromeSelenium.Check-in.coarcade "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
+      # JoinQuant 签到已移到本机跑，见 ChromeSelenium/Check-in/LOCAL_RUN.md。
+      # GitHub 托管 runner 出口 IP 在海外，会被聚宽的地区风控直接拦掉
+      # （页面返回「当前地区暂不支持访问」，登录接口 405 + 非 JSON），改代码没用 —— 别再把它加回来。
 
-      - name: Check in JoinQuant
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'joinquant') }}
-        env:
-          CHECKIN_USERNAME: ${{ secrets.JQ_USERNAME }}
-          CHECKIN_PASSWORD: ${{ secrets.JQ_PASSWORD }}
-          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
-        run: python -B -m ChromeSelenium.Check-in.JoinQuant "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
-
+      # FishPi 已禁用（2026-09-26）。它单跑要 30 分钟 —— fishpi.py:111-140 有 6 次聊天发言，
+      # 每次后面跟一个 time.sleep(300)，是整个 job 耗时的大头。
+      # 要恢复就把下面的 `if: false` 换回原条件：
+      # ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'fishpi') }}
       - name: Check in FishPi
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'fishpi') }}
+        if: false
         env:
           CHECKIN_USERNAME: ${{ secrets.FISHPI_USERNAME }}
           CHECKIN_PASSWORD: ${{ secrets.FISHPI_PASSWORD }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
         run: python -B -m ChromeSelenium.Check-in.fishpi "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
+
+      - name: Check in V2EX
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'v2ex') }}
+        timeout-minutes: 12
+        env:
+          V2EX_USERNAME: ${{ secrets.V2EX_USERNAME }}
+          V2EX_PASSWORD: ${{ secrets.V2EX_PASSWORD }}
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
+        run: python -B -m ChromeSelenium.Check-in.v2ex "$V2EX_USERNAME" "$V2EX_PASSWORD" "$FEISHU_BOT_ID"
+
+      # V2EX 靠验证码 OCR + 重试，失败原因从日志里看不全。把现场（验证码原图、
+      # 失败页 DOM、截图、页面提示文案）传成 artifact，排查不用再靠猜。
+      - name: Upload V2EX diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2ex-debug
+          path: v2ex-debug/
+          if-no-files-found: ignore
+          retention-days: 7
