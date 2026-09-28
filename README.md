@@ -8,11 +8,11 @@
 
 ## 1. selenium 自动化
 
-> 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/blob/master/ChromeSelenium/README.md)
+> 使用 chrome，[环境部署](https://github.com/EchoHeim/GithubAction/blob/master/Selenium/README.md)
 
 - 测试
 
-    环境搭建好之后可以使用 test.py 脚本进行测试，在 GithubAction 目录下执行 `python.exe .\ChromeSelenium\test.py` 会弹出浏览器进入百度首页，等待4秒后，终端会打印网页主题。
+    环境搭建好之后可以使用 test.py 脚本进行测试，在 GithubAction 目录下执行 `python.exe .\Selenium\test.py` 会弹出浏览器进入百度首页，等待4秒后，终端会打印网页主题。
 
 - 网站签到
 
@@ -34,11 +34,11 @@
 
         ```bash
         # 只看会删哪些（免 token，立刻可用）
-        python ChromeSelenium/CleanWorkflowsApi.py --dry-run
+        python Selenium/CleanWorkflowsApi.py --dry-run
 
-        # 真删：token 写进 ChromeSelenium/.env.local 的 GITHUB_TOKEN
-        python ChromeSelenium/CleanWorkflowsApi.py --delete
-        python ChromeSelenium/CleanWorkflowsApi.py --delete --keep 200 --max 50 --workers 8
+        # 真删：token 写进 Selenium/.env.local 的 GITHUB_TOKEN
+        python Selenium/CleanWorkflowsApi.py --delete
+        python Selenium/CleanWorkflowsApi.py --delete --keep 200 --max 50 --workers 8
         ```
 
         > 默认保留最新 100 条、预演不删，必须显式 `--delete`。
@@ -53,9 +53,9 @@
         本机跑法（凭据读同目录 `.env.local`，模板见 `.env.local.example`）：
 
         ```bash
-        python ChromeSelenium/CleanWorkflows.py --dry-run
-        python ChromeSelenium/CleanWorkflows.py --delete
-        python ChromeSelenium/CleanWorkflows.py --delete --max 100
+        python Selenium/CleanWorkflows.py --dry-run
+        python Selenium/CleanWorkflows.py --delete
+        python Selenium/CleanWorkflows.py --delete --max 100
         ```
 
 ## 2. 天气预报信息
@@ -63,6 +63,20 @@
 自动获取指定城市的天气状况，然后邮件发送给收件人
 
 [详细说明](https://github.com/EchoHeim/GithubAction/blob/master/Weather/README.md)
+
+## 3. GitHub 热榜周报（Trending → DeepSeek → 飞书）
+
+**每周六早 6 点（北京时间）** 自动跑一次：抓 GitHub 近一周热度最高的项目 →
+DeepSeek 从候选池里**自主选题**（不无脑取榜首，按"大众可用 / 技术新颖 / 工具属性 / 能落地"
+打分）→ 拉 README 消化成可发布的推广性公众号推文 → 落盘 `articles/YYYY-Www.md`
+（**原生 Markdown**）+ `latest.md` → 推送飞书群机器人。
+
+模型固定 `deepseek-flash`（= DeepSeek-V4.1-Flash），**开启思考模式**。
+
+工作流：[`.github/workflows/trending_article.yml`](./.github/workflows/trending_article.yml)
+（`cron: "0 22 * * 5"` = 周五 22:00 UTC = 周六 06:00 北京）
+
+[详细说明](./Trending/README.md)
 
 ## 参考项目
 

@@ -32,7 +32,7 @@
 
 用法：
     PJ52_COOKIE="htVC_2132_saltkey=...; htVC_2132_auth=...; htVC_2132_sid=..." \
-        python -m ChromeSelenium.Check-in.52pojie
+        python -m Selenium.Check-in.52pojie
 
 可选环境变量：
     PJ52_COOKIE         登录态 Cookie，形如 `name=value; name2=value2`（唯一必需项）
@@ -75,7 +75,7 @@ import socket
 import sys
 import time
 
-from ChromeSelenium.base import *
+from Selenium.base import *
 from Messaging.Feishu import Feishu_SendCardMsg
 
 HOME_URL = os.getenv("PJ52_HOME_URL", "https://www.52pojie.cn/")
@@ -1068,7 +1068,7 @@ def pojie52(cookie="", bot_id=""):
 if __name__ == "__main__":
     if len(sys.argv) == 1 and not os.getenv("PJ52_COOKIE"):
         sys.exit(
-            "用法: python -m ChromeSelenium.Check-in.52pojie\n"
+            "用法: python -m Selenium.Check-in.52pojie\n"
             "  凭据只走环境变量 PJ52_COOKIE（取法见 LOCAL_RUN.md）\n"
             "  可选: python -m ... <飞书机器人 webhook>"
         )

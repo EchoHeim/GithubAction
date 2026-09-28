@@ -109,9 +109,9 @@ celerybeat.pid
 *.sage.py
 
 # 本地运行凭据（含账号密码，严禁入库）
-ChromeSelenium/Check-in/.env.local
+Selenium/Check-in/.env.local
 # 浏览器 profile（含登录 cookie，严禁入库）
-ChromeSelenium/Check-in/.browser-profile/
+Selenium/Check-in/.browser-profile/
 
 # Environments
 .env

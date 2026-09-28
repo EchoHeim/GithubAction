@@ -7,11 +7,11 @@ current_folder = os.path.dirname(os.path.abspath(__file__))
 print("当前脚本所在文件夹路径:", current_folder)
 
 sys.path.append("current_folder/../")  # 添加自定义模块路径
-from ChromeSelenium.base import *
+from Selenium.base import *
 from Messaging.Msg import *
 
 
-from ChromeSelenium.base import *
+from Selenium.base import *
 from Messaging.Msg import *
 
 username = sys.argv[1]  # 登录账号

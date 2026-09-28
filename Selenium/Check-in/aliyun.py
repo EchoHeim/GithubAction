@@ -8,7 +8,7 @@ print("当前脚本所在文件夹路径:", current_folder)
 
 sys.path.append("current_folder/../")  # 添加自定义模块路径
 
-from ChromeSelenium.base import *
+from Selenium.base import *
 from Messaging.Msg import *
 
 from bs4 import BeautifulSoup

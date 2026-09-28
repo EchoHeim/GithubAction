@@ -46,7 +46,7 @@ jobs:
       - name: Install requirements
         run: |
           pip install --upgrade pip
-          pip install -r ./ChromeSelenium/requirements.txt
+          pip install -r ./Selenium/requirements.txt
 
       - name: Install system libs
         # opencv-python 需要 libGL，无头 Linux runner 上缺它会 import cv2 直接失败
@@ -55,7 +55,7 @@ jobs:
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
 
-      # JoinQuant 签到已移到本机跑，见 ChromeSelenium/Check-in/LOCAL_RUN.md。
+      # JoinQuant 签到已移到本机跑，见 Selenium/Check-in/LOCAL_RUN.md。
       # GitHub 托管 runner 出口 IP 在海外，会被聚宽的地区风控直接拦掉
       # （页面返回「当前地区暂不支持访问」，登录接口 405 + 非 JSON），改代码没用 —— 别再把它加回来。
 
@@ -69,7 +69,7 @@ jobs:
           CHECKIN_USERNAME: ${{ secrets.FISHPI_USERNAME }}
           CHECKIN_PASSWORD: ${{ secrets.FISHPI_PASSWORD }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
-        run: python -B -m ChromeSelenium.Check-in.fishpi "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
+        run: python -B -m Selenium.Check-in.fishpi "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
 
       - name: Check in V2EX
         if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'v2ex') }}
@@ -78,7 +78,7 @@ jobs:
           V2EX_USERNAME: ${{ secrets.V2EX_USERNAME }}
           V2EX_PASSWORD: ${{ secrets.V2EX_PASSWORD }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
-        run: python -B -m ChromeSelenium.Check-in.v2ex "$V2EX_USERNAME" "$V2EX_PASSWORD" "$FEISHU_BOT_ID"
+        run: python -B -m Selenium.Check-in.v2ex "$V2EX_USERNAME" "$V2EX_PASSWORD" "$FEISHU_BOT_ID"
 
       # V2EX 靠验证码 OCR + 重试，失败原因从日志里看不全。把现场（验证码原图、
       # 失败页 DOM、截图、页面提示文案）传成 artifact，排查不用再靠猜。
@@ -103,7 +103,7 @@ jobs:
         env:
           PJ52_COOKIE: ${{ secrets.PJ52_COOKIE || vars.PJ52_COOKIE }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
-        run: python -B -m ChromeSelenium.Check-in.52pojie
+        run: python -B -m Selenium.Check-in.52pojie
 
       # 掘金与 52pojie 同理：密码登录会被字节系风控要求「抖音 APP 扫码验身」，
       # 自动化走不通 —— 凭据用登录态 Cookie（JUEJIN_COOKIE），跳过登录页。
@@ -121,7 +121,7 @@ jobs:
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
           # 字节验证码对无头很敏感 → 用 xvfb 虚拟显示器跑**有头**模式（base.py 认这个开关）
           CHECKIN_HEADLESS: "0"
-        run: xvfb-run -a python -B -m ChromeSelenium.Check-in.juejin
+        run: xvfb-run -a python -B -m Selenium.Check-in.juejin
 
       - name: Upload 52pojie / JueJin diagnostics
         if: always()

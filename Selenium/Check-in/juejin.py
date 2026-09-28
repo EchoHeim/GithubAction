@@ -28,7 +28,7 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
      连续天数 +1 / 出现「签到成功」提示），拿不到就 dump 现场后抛错。
 
 用法（凭据走环境变量）：
-    JUEJIN_USERNAME=手机号 JUEJIN_PASSWORD=密码 python -m ChromeSelenium.Check-in.juejin
+    JUEJIN_USERNAME=手机号 JUEJIN_PASSWORD=密码 python -m Selenium.Check-in.juejin
     # 兼容老写法：python -m ... <手机号/邮箱> <密码> [飞书机器人 webhook]
 
 可选环境变量：
@@ -54,7 +54,7 @@ import time
 import cv2
 import numpy as np
 
-from ChromeSelenium.base import *
+from Selenium.base import *
 from Messaging.Feishu import Feishu_SendCardMsg
 
 HOME_URL = os.getenv("JUEJIN_HOME_URL", "https://juejin.cn/")
@@ -721,7 +721,7 @@ if __name__ == "__main__":
         os.getenv(k) for k in ("JUEJIN_COOKIE", "JUEJIN_USERNAME", "JUEJIN_PASSWORD")
     ):
         sys.exit(
-            "用法: python -m ChromeSelenium.Check-in.juejin\n"
+            "用法: python -m Selenium.Check-in.juejin\n"
             "  凭据走环境变量: JUEJIN_COOKIE（推荐）/ JUEJIN_USERNAME + JUEJIN_PASSWORD\n"
             "  也兼容老写法: python -m ... <手机号/邮箱> <密码> [飞书机器人 webhook]"
         )

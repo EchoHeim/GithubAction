@@ -36,13 +36,13 @@ CHECKIN_HEADLESS=1
 手动跑一次（能看到浏览器和实时输出）：
 
 ```bat
-ChromeSelenium\Check-in\run_local.bat
+Selenium\Check-in\run_local.bat
 ```
 
 或者直接调 Python：
 
 ```bash
-C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B ChromeSelenium/Check-in/run_local.py
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/Check-in/run_local.py
 ```
 
 ## 跑其它站点（52pojie / 掘金）
@@ -51,10 +51,10 @@ C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Chr
 
 ```bash
 # 吾爱破解
-C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B ChromeSelenium/Check-in/run_local.py 52pojie
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/Check-in/run_local.py 52pojie
 
 # 掘金
-C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B ChromeSelenium/Check-in/run_local.py juejin
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/Check-in/run_local.py juejin
 ```
 
 各自的凭据在 `.env.local` 里填对应的一组：`PJ52_COOKIE`、
@@ -165,7 +165,7 @@ Request Headers 里的 `cookie:` 整行，或右键 Copy as cURL）——掘金�
 聚宽有**自研的拼图滑块风控**，登录和签到都可能弹（触发时登录接口返回 `code=105`）。
 所以本机运行做了两件事：
 
-1. **固定浏览器 profile**：`ChromeSelenium/Check-in/.browser-profile/`。
+1. **固定浏览器 profile**：`Selenium/Check-in/.browser-profile/`。
    Chrome 用它启动，登录 cookie 留在里面，第二天跑的时候直接复用，**不用重新登录**。
    （该目录已在 `.gitignore` 里 —— 里面有你的登录 cookie，别提交。）
 2. **首次运行需要你盯一下**：第一次跑会真的登录一次。如果弹出滑块验证码
@@ -174,7 +174,7 @@ Request Headers 里的 `cookie:` 整行，或右键 Copy as cURL）——掘金�
 想从头来过（比如怀疑 cookie 失效），删掉 profile 目录再跑：
 
 ```bat
-rmdir /s /q "ChromeSelenium\Check-in\.browser-profile"
+rmdir /s /q "Selenium\Check-in\.browser-profile"
 ```
 
 > **已知限制**：如果**签到动作本身**弹滑块，当前脚本不会自动识别 —— 日志里会看到签到失败。
@@ -200,7 +200,7 @@ rmdir /s /q "ChromeSelenium\Check-in\.browser-profile"
 每次运行同时打印到控制台并落盘：
 
 ```
-ChromeSelenium/Check-in/logs/joinquant-YYYY-MM-DD.log
+Selenium/Check-in/logs/joinquant-YYYY-MM-DD.log
 ```
 
 跑完最后一行会给结论（是否检测到失败标记），失败时附上对应的原文。
@@ -227,7 +227,7 @@ ChromeSelenium/Check-in/logs/joinquant-YYYY-MM-DD.log
 3. **系统依赖** —— `opencv-python` 需要 `libgl1` 和 `libglib2.0-0`。
 
 ```bash
-22 6 * * * cd /path/to/GithubAction && /path/to/python -u ChromeSelenium/Check-in/run_local.py >> ChromeSelenium/Check-in/logs/cron.log 2>&1
+22 6 * * * cd /path/to/GithubAction && /path/to/python -u Selenium/Check-in/run_local.py >> Selenium/Check-in/logs/cron.log 2>&1
 ```
 
 ## 线上怎么办

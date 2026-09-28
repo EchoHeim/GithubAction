@@ -5,7 +5,7 @@
 import json
 import sys
 
-from ChromeSelenium.base import *
+from Selenium.base import *
 from Messaging.Msg import *
 
 username = sys.argv[1]  # 登录账号
