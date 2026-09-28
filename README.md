@@ -25,9 +25,38 @@
     自动浇水，帮好友施肥
 
 - 清除工作流日志
-    - CleanWorkflows.py
 
-        > 不能在 github actions 中自动运行，需手动指定仓库链接，二次验证登录后自动删除工作流日志。
+    两个版本，用途不同：
+
+    - **CleanWorkflowsApi.py（推荐）** — 走 GitHub REST API，并发删除。
+      公开仓库**列记录不需要 token**，删除需要一个带 `Actions: Read and write` 的 token。
+      868 条记录几分钟就完事。
+
+        ```bash
+        # 只看会删哪些（免 token，立刻可用）
+        python ChromeSelenium/CleanWorkflowsApi.py --dry-run
+
+        # 真删：token 写进 ChromeSelenium/.env.local 的 GITHUB_TOKEN
+        python ChromeSelenium/CleanWorkflowsApi.py --delete
+        python ChromeSelenium/CleanWorkflowsApi.py --delete --keep 200 --max 50 --workers 8
+        ```
+
+        > 默认保留最新 100 条、预演不删，必须显式 `--delete`。
+        > 注意代理方向和下面那版**相反**：API 调用要跟随环境代理（本机直连会被限流），
+        > Selenium 那版反而必须清掉代理。
+
+    - **CleanWorkflows.py** — 真浏览器逐条点删除。慢（每条 5~8 秒），
+      但不需要 token，只用账号密码走网页登录。
+
+        > 不能在 github actions 中自动运行，需本机手动跑，二次验证登录后自动删除工作流日志。
+
+        本机跑法（凭据读同目录 `.env.local`，模板见 `.env.local.example`）：
+
+        ```bash
+        python ChromeSelenium/CleanWorkflows.py --dry-run
+        python ChromeSelenium/CleanWorkflows.py --delete
+        python ChromeSelenium/CleanWorkflows.py --delete --max 100
+        ```
 
 ## 2. 天气预报信息
 

@@ -18,6 +18,8 @@ on:
         options:
           - all
           - v2ex
+          - 52pojie
+          - juejin
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -25,9 +27,9 @@ jobs:
   build:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
-    # 45 → 20：原来是被 FishPi 的 30 分钟睡眠撑起来的，FishPi 禁用后
-    # 只剩 V2EX（自带 12 分钟上限）+ 环境准备，20 分钟留了足够余量。
-    timeout-minutes: 20
+    # 20 → 45：新增 52pojie / 掘金 两步。两步各自带 10 分钟上限，
+    # 加上 V2EX 的 12 分钟和环境准备，45 分钟留了余量。
+    timeout-minutes: 45
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -48,7 +50,7 @@ jobs:
 
       - name: Install system libs
         # opencv-python 需要 libGL，无头 Linux runner 上缺它会 import cv2 直接失败
-        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 xvfb
 
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
@@ -86,5 +88,48 @@ jobs:
         with:
           name: v2ex-debug
           path: v2ex-debug/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # 52pojie 的任务页被自家 wzws WAF 保护（图片验证码，脚本用 ddddocr 过），
+      # 而**登录页有人机验证（Cloudflare Turnstile），自动化过不去** —— 所以凭据用登录态
+      # Cookie（PJ52_COOKIE），跳过登录页。用户名/密码作为兜底保留，但脚本会快失败并提示。
+      # Cookie 失效时（Discuz 会话约一个月）去浏览器重新登录后再抄一次。
+      - name: Check in 52pojie
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
+        timeout-minutes: 10
+        # 只用 Cookie 登录（密码登录已移除：登录页是 Cloudflare Turnstile，本机线路到不了它）。
+        # 因此不需要 xvfb/有头模式，无头更稳。
+        env:
+          PJ52_COOKIE: ${{ secrets.PJ52_COOKIE || vars.PJ52_COOKIE }}
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
+        run: python -B -m ChromeSelenium.Check-in.52pojie
+
+      # 掘金与 52pojie 同理：密码登录会被字节系风控要求「抖音 APP 扫码验身」，
+      # 自动化走不通 —— 凭据用登录态 Cookie（JUEJIN_COOKIE），跳过登录页。
+      # ⚠️ 凭据同时兼容两种存放位置：Secrets 优先，其次 Variables（有人会存在 Variables 里，
+      #    而 `secrets.X` 取不到 → 现象是「账号传进来了、密码却是空的」）。
+      - name: Check in JueJin
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'juejin') }}
+        timeout-minutes: 15
+        env:
+          JUEJIN_COOKIE: ${{ secrets.JUEJIN_COOKIE || vars.JUEJIN_COOKIE }}
+          JUEJIN_USERNAME: ${{ secrets.JUEJIN_USERNAME || vars.JUEJIN_USERNAME }}
+          # 注意：这个仓库里掘金的 secret 实际叫 JUEJIN_PASSWD（少个 OR）—— 两种拼写都兼容，
+# 免得改名/改名不同步时又出现「用户名有值、密码 0 字」这种看不见的坑。
+          JUEJIN_PASSWORD: ${{ secrets.JUEJIN_PASSWD || secrets.JUEJIN_PASSWORD || vars.JUEJIN_PASSWD || vars.JUEJIN_PASSWORD }}
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
+          # 字节验证码对无头很敏感 → 用 xvfb 虚拟显示器跑**有头**模式（base.py 认这个开关）
+          CHECKIN_HEADLESS: "0"
+        run: xvfb-run -a python -B -m ChromeSelenium.Check-in.juejin
+
+      - name: Upload 52pojie / JueJin diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-sites-debug
+          path: |
+            52pojie-debug/
+            juejin-debug/
           if-no-files-found: ignore
           retention-days: 7

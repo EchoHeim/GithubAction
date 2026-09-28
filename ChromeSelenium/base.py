@@ -31,6 +31,9 @@ def get_web_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("window-size=1920x1080")
     options.add_argument("--disable-dev-shm-usage")
+    # 打开 performance 日志：登录/回帖这类 ajax 提交的**真实响应体**要靠它抓
+    # （Discuz 的成功/失败都可能不落到界面上，见 52pojie.py 的 dump_login_response）
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
     # 抹掉 Selenium 的自动化指纹。V2EX 这类站点会据此判定机器人，
     # 轻则弹 Cloudflare 校验，重则把请求直接挡在验证码之前。
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -53,15 +56,31 @@ def get_web_driver():
         # 默认仍有头：无头更容易被风控盯上，本地跑不差这几分钟。
         if os.environ.get("CHECKIN_HEADLESS") == "1":
             options.add_argument("--headless")
-        browser = webdriver.Chrome(service=service, options=options)
+        # Selenium Manager 需要联网取 chromedriver，本机被安全策略拦住时它会被直接杀掉
+        # （现象：进程 SIGTERM，什么日志都没有）。用 CHECKIN_CHROMEDRIVER 指一个现成的
+        # chromedriver.exe 就能绕开，不必改代码。不设这个变量时行为不变。
+        driver_path = os.environ.get("CHECKIN_CHROMEDRIVER")
+        if driver_path:
+            print("\n[INFO] 使用指定 chromedriver: %s\n" % driver_path)
+            browser = webdriver.Chrome(
+                service=Service(executable_path=driver_path), options=options
+            )
+        else:
+            browser = webdriver.Chrome(service=service, options=options)
     elif platform.system() == "Linux":
         print("\nCurrent Operating System: ==== Linux ====\n")
         chromedriver = "/usr/bin/chromedriver"
         os.environ["webdriver.chrome.driver"] = chromedriver
-        # CI 无桌面环境，强制无头模式。—— GitHub Actions 新运行器 hostname 不再是 fv-az-*，
-        # 旧逻辑按 "fv-az" 判断会漏掉 --headless，导致 Chrome 找显示器失败、启动即退出。
-        # 无头模式不依赖 Xvfb/显示器，最稳。
-        options.add_argument("--headless")
+        # 默认无头：CI 没桌面环境，无头不依赖 Xvfb/显示器，最稳。
+        # （旧逻辑按 hostname "fv-az" 判断，新运行器名字变了会漏判，所以改成默认无头。）
+        #
+        # 例外：有些站点的风控（如字节 verifycenter 验证码）对**无头**特别敏感，
+        # 这时可以在 xvfb-run 里跑有头模式 —— 设 CHECKIN_HEADLESS=0，并用
+        # `xvfb-run -a python ...` 启动（workflow 里掘金那步就是这么跑的）。
+        if os.environ.get("CHECKIN_HEADLESS") == "0":
+            print("[INFO] CHECKIN_HEADLESS=0 → 有头模式（需要显示器或 xvfb-run）\n")
+        else:
+            options.add_argument("--headless")
         browser = webdriver.Chrome(
             service=Service(executable_path=chromedriver), options=options
         )
@@ -95,6 +114,59 @@ def open_page(driver, url, timeout=45):
             raise exc
 
         # 即使导航尚未提交也交给调用方的元素等待处理；部分站点会在此后才完成跳转。
+
+
+def parse_cookie_header(raw):
+    """把浏览器 Cookie 头解析成 [(name, value)]。
+
+    支持直接粘 `a=1; b=2` 形式；也容忍换行分隔（有人从 DevTools 里一行一个地抄）。
+    """
+    pairs = []
+    for chunk in (raw or "").replace("\n", ";").split(";"):
+        chunk = chunk.strip()
+        if not chunk or "=" not in chunk:
+            continue
+        name, value = chunk.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if name:
+            pairs.append((name, value))
+    return pairs
+
+
+def inject_cookies(driver, cookie_header, domain):
+    """把 Cookie 注入浏览器。
+
+    用 CDP 的 Network.setCookie：它不要求当前页面已在该域名下，也支持
+    `domain=".example.com"` 这种带点前缀的写法。
+
+    ⚠️ 只有从**真实请求头**（Network → Request Headers / Copy as cURL）里抄的 Cookie 才完整：
+    站点把认证类 cookie 标了 HttpOnly，`document.cookie` / Console 读不到它们。
+    """
+    pairs = parse_cookie_header(cookie_header)
+    if not pairs:
+        raise ValueError("Cookie 为空或格式不对（应形如 name=value; name2=value2）")
+
+    ok, failed = 0, []
+    for name, value in pairs:
+        try:
+            driver.execute_cdp_cmd(
+                "Network.setCookie",
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": "/",
+                    "secure": True,
+                },
+            )
+            ok += 1
+        except WebDriverException as err:
+            failed.append("%s(%s)" % (name, str(err)[:40]))
+    print("===> Cookie 注入: 成功 %d 项%s" % (ok, ("，失败 " + ", ".join(failed)) if failed else ""))
+    if ok == 0:
+        raise RuntimeError("Cookie 一项都没注入成功")
+    return ok
 
 
 def checkPlatformInfo():
