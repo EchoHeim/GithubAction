@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
-"""掘金（juejin.cn）签到：密码登录（自动过滑块验证码）→ 每日签到页点「立即签到」→ 读矿石数。
+"""掘金（juejin.cn）签到：密码登录（自动过滑块验证码）→ 每日签到页点「立即签到」
+→ 进福利中心读矿石数 → 免费抽奖一次 → 一起推飞书卡片。
 
 ━━━ 登录：密码 + 滑块验证码（已实现，但服务端行为风控可能仍拦）━━━
 2026-09-27 实测：点「登录」后站点会弹**字节验证中心的滑块验证码**，它在 iframe 里：
@@ -19,13 +20,43 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
   * 失败且配了 `JUEJIN_COOKIE` 时**自动降级**用 Cookie，保证签到本身能完成。
 
 ━━━ 签到流程 ━━━
-`/user/center/signin` 是「每日签到」页：左侧日历 + 右侧大按钮「立即签到」，
-页面上还有「连续签到天数 / 累计签到天数 / 当前矿石数」。脚本：
+`/user/center/signin` 是「每日签到」页：左侧菜单 + 右侧日历 + 大按钮「立即签到」，
+页面上还有三张统计卡：**`4 连续签到天数` / `5 累计签到天数` / `55174 当前矿石数`**，
+注意是**数字在上、标签在下**（所以取值走 DOM 结构，不用文本顺序，见 SIGNIN_STATS_JS）。
+脚本：
   1. 登录（或复用 Cookie 登录态）→ 打开签到页；
   2. 读签到前状态：矿石数、连续/累计天数、按钮文案；
   3. 按钮已是「已签到」类文案 → 判「今日已签到」，直接结束；
   4. 否则点「立即签到」，按**多重判据**确认成功（按钮文案变化 / 矿石数变化 /
      连续天数 +1 / 出现「签到成功」提示），拿不到就 dump 现场后抛错。
+
+━━━ 幸运抽奖：矿石数 + 免费抽取一次（2026-09-29 新增）━━━
+正确的路径（**lodge 截图确认，别再走别的路**）：
+
+    签到页 → 点**左侧菜单**的「幸运抽奖」→ 转盘页 /user/center/lottery
+           → 读顶部矿石胶囊（截图实测 55174）
+           → 点「免费抽奖次数：1 次」
+
+⚠️ 这里坑很深，两轮线上都栽了，把结论钉死：
+  · **别再点头像菜单**：里头是「成长福利」，跳的是 `/user/center/growth`，
+    而那个页面是**「成长等级」**（掘友分 / 等级权益 / 去上传），**根本没有转盘**；
+  · **别只看 URL 判断进对页面**：第 1 轮就是 URL 命中 `/growth` 但页面全错。
+    判据必须看**页面内容**（有「幸运大转盘/免费抽奖次数」且没有「掘友分明细」），
+    见 `_on_lottery_page()`；
+  · 顶部胶囊里**只有数字、没有「矿石」二字**，而且整页别处也有大数字
+    （成长等级页的 `JY8 25000` 就被误读成矿石数过），所以取值要带语义排除。
+
+抽奖是**锦上添花**：登录/签到已经成功后，抽奖这一步失败只记进卡片的备注，
+不改变签到结论、不影响退出码（否则抽奖挂一天就把整天的签到判成失败）。
+
+「免费抽奖次数：N 次」里的 N 是站点自己给的，别拿它当条件猜 —— 直接点，
+然后用**硬证据**确认有没有真的抽到：① 免费次数 N→N-1 或消失（最硬）
+② 按钮转「今日已抽完」③ 矿石数变化 ④ **中奖弹层**里出现奖品。
+⚠️ 别扫整页文案找「恭喜/抽中」—— 页面右侧「围观大奖」栏一直在播报**别人**的中奖，
+扫整页必然误报（第 1 轮就是这么把「一下没抽」报成「抽奖成功」的）。
+
+回归测试：`python -B Selenium/Check-in/juejin_regress_test.py`（合成 DOM，11 项断言）。
+改选择器后务必重跑；跑之前要清代理（见 LOCAL_RUN.md）。
 
 用法（凭据走环境变量）：
     JUEJIN_USERNAME=手机号 JUEJIN_PASSWORD=密码 python -m Selenium.Check-in.juejin
@@ -37,6 +68,8 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
     JUEJIN_COOKIE        登录态 Cookie（可选兜底：走 Cookie 时跳过登录页与滑块）
     FEISHU_BOT_ID        飞书机器人 webhook，给了才推卡片（含签到状态 + 矿石数）
     JUEJIN_SIGNIN_URL    签到页，默认 https://juejin.cn/user/center/signin
+    JUEJIN_LOTTERY_URL   幸运抽奖页，默认 https://juejin.cn/user/center/lottery
+    JUEJIN_LOTTERY=0     关掉免费抽奖（只签到不抽奖）
     JUEJIN_MAX_ATTEMPTS  整轮重来的次数，默认 3
     JUEJIN_HOME_URL      首页，默认 https://juejin.cn/
 
@@ -59,6 +92,9 @@ from Messaging.Feishu import Feishu_SendCardMsg
 
 HOME_URL = os.getenv("JUEJIN_HOME_URL", "https://juejin.cn/")
 SIGNIN_URL = os.getenv("JUEJIN_SIGNIN_URL", "https://juejin.cn/user/center/signin")
+GROWTH_URL = os.getenv("JUEJIN_GROWTH_URL", "https://juejin.cn/user/center/growth")
+# 抽奖开关：默认开；置 0 时只签到不抽奖（比如手动补跑当天又不想消耗免费次数）
+LOTTERY_ENABLED = os.getenv("JUEJIN_LOTTERY", "1") != "0"
 MAX_ATTEMPTS = int(os.getenv("JUEJIN_MAX_ATTEMPTS", "3"))
 
 JUEJIN_COOKIE_ENV = "JUEJIN_COOKIE"
@@ -132,10 +168,168 @@ SIGNIN_BUTTON_XPATHS = (
 )
 SIGNIN_DONE_MARKERS = ("已签到", "今日已签到", "明天再来", "已领取")
 SIGNIN_SUCCESS_MARKERS = ("签到成功", "领取成功", "获得", "恭喜")
-# 页面上「当前矿石数 / 连续签到天数 / 累计签到天数」的取值
-ORES_PATTERN = r"当前矿石数\D{0,20}?(\d[\d,]*)"
-STREAK_PATTERN = r"连续签到天数\D{0,20}?(\d+)"
-TOTAL_PATTERN = r"累计签到天数\D{0,20}?(\d+)"
+# 签到页三个统计卡（截图 1：`4 连续签到天数` / `5 累计签到天数` / `55174 当前矿石数`）
+#
+# ⚠️⚠️ 2026-09-29 两轮线上都读串了（`矿石数=2026 连续=5 累计=50174`），根因：
+#   掘金页面上**数字在前、标签在后**，而且「累计」那个标签实际写作
+#   **「累计签到天数」没错、但还有个「累计签到天数」和「连续签到天数」是并列的两个卡片** ——
+#   文本顺序打乱后，用「标签后跟数字」的正则去配，必然把**下一个卡片的数字**配进来。
+#   更糟的是「当前矿石数」标签在数字**后面**，所以 `当前矿石数(\d+)` 根本配不到矿石数，
+#   反而 `累计签到天数(\d+)` 吃到了矿石数那个大数字。
+#   结论：**别用整页文本顺序配数字**，直接用 DOM 结构 —— 找含标签文案的元素，
+#   取它**同一个卡片容器内**数字元素的值。见 SIGNIN_STATS_JS。
+SIGNIN_STATS_JS = """
+var out = {ores: null, streak: null, total: null};
+var LABELS = {'当前矿石数': 'ores', '连续签到天数': 'streak', '累计签到天数': 'total'};
+var labelEls = document.querySelectorAll('div, span, p, b, strong, em, dt, dd');
+for (var i = 0; i < labelEls.length; i++) {
+  var el = labelEls[i];
+  if (el.children.length) continue;                  // 只要叶子标签
+  var t = (el.textContent || '').trim();
+  if (!LABELS[t]) continue;
+  // 从标签往上找 1~3 层，取该容器里第一个纯数字叶子元素 = 这个卡片的数值
+  var p = el;
+  for (var hop = 0; hop < 4 && p; hop++, p = p.parentElement) {
+    var nums = p.querySelectorAll('div, span, p, b, strong, em');
+    for (var j = 0; j < nums.length; j++) {
+      var n = nums[j];
+      if (n.children.length) continue;
+      var nt = (n.textContent || '').trim();
+      if (!/^\\d[\\d,]*$/.test(nt)) continue;
+      var r = n.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      out[LABELS[t]] = nt.replace(/,/g, '');
+      break;
+    }
+    if (out[LABELS[t]]) break;
+  }
+}
+return out;
+"""
+# 文本正则只作**最后兜底**（DOM 取值失败时），且方向改成「数字在前、标签在后」
+ORES_FALLBACK_PATTERN = r"(\d[\d,]{2,})\s*当前矿石数"
+STREAK_FALLBACK_PATTERN = r"(\d+)\s*连续签到天数"
+TOTAL_FALLBACK_PATTERN = r"(\d+)\s*累计签到天数"
+
+# ── 福利中心：矿石数 + 幸运大转盘免费抽奖 ──
+#
+# ⚠️⚠️ 2026-09-29 **两轮线上实测都栽在「进错页面」**，把结论写死在这，别再走回头路：
+#   第 1 轮：以为入口在右上角**头像菜单**里 → 点了头像，菜单里是「成长福利」，
+#           跳 `/user/center/growth` —— 那个页面标题是「成长等级」，正文全是
+#           「掘友分 / 等级权益 / 去上传」，**根本没有转盘**。日志里
+#           「未找到抽奖按钮」dump 出来的页面文本就是铁证。
+#   第 2 轮（lodge 截图指正）：抽奖页的入口是**左侧菜单的「幸运抽奖」**，
+#           而且它在**签到页**上就有！顺序是：
+#             签到页 → 点左侧菜单「幸运抽奖」→ 转盘页（/user/center/lottery）
+#           转盘页左侧菜单里「幸运抽奖」是**选中态**，右上角矿石胶囊显示数字。
+#
+#   所以正确的导航是**签到页左侧菜单项**，不是头像菜单、也不是 /growth。
+#   教训：入口选择器要按 lodge 给的截图走，别自己推测。
+LOTTERY_URL = os.getenv("JUEJIN_LOTTERY_URL", "https://juejin.cn/user/center/lottery")
+# 左侧菜单「幸运抽奖」：用 `contains` 而不是 `=`，因为选中态元素文本可能带装饰字符
+LOTTERY_MENU_XPATHS = (
+    "//*[normalize-space(text())='幸运抽奖']",
+    "//*[contains(text(),'幸运抽奖')]",
+)
+# 转盘页 URL 判据
+LOTTERY_URL_HINTS = ("/user/center/lottery", "lottery")
+# 转盘页特征文案（进错页面时用它判断，别再只看 URL —— /growth 那次就是 URL 对了但页面错了）
+LOTTERY_PAGE_MARKERS = ("幸运大转盘", "免费抽奖次数", "十连抽", "围观大奖")
+# 反例文案：出现这些说明进的是「成长等级」页，不是抽奖页
+LOTTERY_WRONG_PAGE_MARKERS = ("掘友分明细", "等级规则", "等级权益", "升级行为")
+
+# 头像菜单那条老路留着做**兜底**（万一哪天左侧菜单改版）：菜单里通常是「成长福利」，
+# 跳的是 /growth（成长等级页），所以只能当最后一招，且进去后必须复核有没有转盘。
+AVATAR_XPATHS = (
+    "//img[contains(@class,'avatar') and not(contains(@class,'avatar-group'))]",
+    "//header//img[contains(@class,'avatar')]",
+    "//*[contains(@class,'avatar') and not(contains(@class,'avatar-group'))]",
+)
+GROWTH_MENU_XPATHS = (
+    "//*[normalize-space(text())='成长福利']",
+    "//*[contains(text(),'成长福利')]",
+    "//*[normalize-space(text())='福利中心']",
+)
+GROWTH_URL = os.getenv("JUEJIN_GROWTH_URL", "https://juejin.cn/user/center/growth")
+
+# 顶部矿石胶囊（截图那个「🪙 50174」）。
+#
+# ⚠️ 2026-09-29 线上实测「未读取到」，两个原因：
+#   1. `contains(@class,'ore')` 会命中 **chat-box / more / score 这类无关类名**，
+#      匹配到一堆空元素，前面几个取不到数字就一路空手而归；
+#   2. 胶囊的数字直接是**元素自身的文本**（`<div class="...">50174</div>`），
+#      没有「矿石」二字在里面 —— 按 `contains(text(),'矿石')` 找会命中旁边的图标/标签，
+#      而它里面的数字是空的。
+#    所以改成：按**叶子元素 + 文本形态**找 —— 元素自身文本恰好是一个「纯数字/千分位数字」，
+#    且在页面**上半屏**（胶囊在 banner 里、y 很小），再用附近有没有「矿石」文案加权。
+ORES_NUMBER_RE = r"^\s*(\d[\d,]{1,9})\s*$"
+ORES_INLINE_JS = """
+var re = /^\\s*\\d[\\d,]{1,9}\\s*$/;
+// ⚠️ EXCLUDE 是「语义排除词表」：命中这些词的邻近上下文一律不认。
+//    2026-09-29 生产事故积累：
+//      · 等级/JY/掘友分/分值/权益/规则 → 成长等级页的 `JY8 25000` 阈值
+//      · 次数/十连/抽奖            → 抽奖按钮上的「免费抽奖次数：1 次」
+//      · 还需/升至                 → 「还需 120 升至下一级」
+//      · 消息/通知/角标/badge      → 页头未读角标（4 位数的角标会抢答「最上方大数字」）
+var EXCLUDE = /等级|JY|掘友分|还需|升至|分值|权益|规则|待补签|已签到|次数|十连|抽奖|消息|通知|角标/;
+var out = [];
+document.querySelectorAll('div, span, p, b, strong, em').forEach(function (el) {
+  if (el.children.length) return;                 // 只要叶子节点，避免读到大容器的拼接文本
+  var t = (el.textContent || '').trim();
+  if (!re.test(t)) return;
+  var r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return;     // 不可见
+  if (r.left < 0 || r.top < 0) return;
+  // ⚠️ 2026-09-29 线上读错了：拿到的 25000 其实是成长等级页「JY8 25000」那个阈值！
+  //    所以必须排除**带等级/分值/次数语义**的上下文，否则随便一页都能撞出个数字。
+  //    注意 `near` 只往上爬 3 层、每层截 60 字符 —— 爬太深会把整页文案吸进来，
+  //    EXCLUDE 里的宽容词（比如「次数」）就会误杀真胶囊。
+  var near = '';
+  var p = el;
+  for (var i = 0; i < 3 && p; i++, p = p.parentElement) {
+    near += (p.textContent || '').slice(0, 60);
+  }
+  if (EXCLUDE.test(near)) return;
+  // 页头区域（y < 80）里带角标类名的数字直接判死，别指望 EXCLUDE 一定含关键词
+  if (r.top < 80 && (el.className || '').toString().match(/badge|red-?dot|count|unread/i)) return;
+  out.push({v: t.replace(/,/g, ''), y: r.top, x: r.left,
+            hit: near.indexOf('矿石') >= 0 ? 1 : 0});
+});
+return out;
+"""
+# 抽奖按钮：**别把「免费抽奖次数：1 次」整串写进 xpath** —— 次数是当天的动态值
+# （截图那天是 1 次，明天可能是 2 次），写死就失效。按「抽奖」二字模糊匹配。
+#
+# ⚠️ 2026-09-29 线上**两轮都栽在这**：左侧导航菜单的「幸运抽奖」也含「抽奖」二字，
+#    第一版被 `//*[contains(text(),'抽奖')]` 命中；第二版加了
+#    `not(contains(@class,'menu'/'nav'/'tab'/'item'))` 仍然没用 —— 因为线上那个
+#    菜单项**外层没有这些类名**（都是构建哈希），而且它未必是 `li`。
+#    结论：**别用「抽奖」二字模糊匹配**。改为认按钮的**独有文案特征**：
+#      · 有免费次数时：`免费抽奖次数：1 次`（含「免费抽奖次数」+ 末尾「次」）
+#      · 无免费次数时：按钮转「今日已抽完」类文案（由 DONE_MARKERS 处理，根本不用点）
+#      · 直白的「免费抽取一次」也留着兜底
+#    再补一条**结构判据**：按钮是 `button`，或位于转盘容器内。
+LOTTERY_BUTTON_XPATHS = (
+    # 最强特征：含「免费抽奖次数」的按钮（次数是动态值，所以只认前半段文案）
+    "//button[contains(normalize-space(text()),'免费抽奖次数')]",
+    "//*[contains(normalize-space(text()),'免费抽奖次数') and not(self::li)]",
+    # 明确文案
+    "//button[normalize-space(text())='免费抽取一次']",
+    "//*[normalize-space(text())='免费抽取一次']",
+    "//button[contains(normalize-space(text()),'免费抽取')]",
+    # 转盘容器内的 button（结构兜底：容器类名常含 lottery/draw/wheel/prize）
+    "//*[contains(@class,'lottery') or contains(@class,'wheel') or contains(@class,'prize')]//button",
+)
+# 已抽完：按钮转这些文案就别再点了（再点等于白撞一次接口、还可能触发风控）
+LOTTERY_DONE_MARKERS = ("今日已抽完", "已抽完", "已用完", "明日再来", "没有免费", "次数已用完")
+
+# ⚠️ 历史教训（判据已删，教训留着）：2026-09-29 第一版拿「恭喜/抽中/获得」扫**整页文案**
+#    判抽奖成功，而抽奖页右侧「围观大奖」栏一直在播报**别人**的中奖
+#    （`恭喜 胡毛毛 抽中 Pico Neo3`），于是「一下没抽」被报成「抽奖成功」。
+#    结论：**任何"中奖"判据都不许扫整页文案**，只能是结构性的（弹层 / 次数变化）。
+#    第 5 轮 lodge 明确要求「不用获取抽奖确认」——连"确认抽奖结果"这一步都取消了
+#    （点完即返回，见 lottery_free_draw），所以弹层读取 / 弹层关闭那套代码已整体删除。
+#    如果以后要重新加结果确认，**别再退回扫整页那条路**。
 
 
 def _safe_write(path, data):
@@ -158,29 +352,36 @@ def page_text(driver):
 
 
 def dump_debug(driver, tag, notes=(), secrets=()):
-    """留存失败现场：URL、页面文案、DOM、截图（入库前抹掉凭据）。"""
+    """留存失败现场：URL、页面文案、DOM、截图（入库前抹掉凭据）。
+
+    ⚠️ 整个函数**不得抛异常**（2026-09-29 踩到）：它是在错误处理路径上调用的，
+    driver 这时可能已经挂了（浏览器崩了/连接断了），连 `page_text` 都会抛 ——
+    那样会把「原本只是取不到现场」升级成真正的失败，掩盖掉真正的错误。
+    所以每一处取数各自兜底。
+    """
     prefix = os.path.join(DEBUG_DIR, "%s_%s" % (tag, time.strftime("%H%M%S")))
 
     info = []
-    try:
-        info.append("url: %s" % driver.current_url)
-        info.append("title: %s" % driver.title)
-    except WebDriverException as err:
-        info.append("url/title 读取失败: %s" % err)
-    info.append("页面文本: %s" % page_text(driver)[:300])
+
+    def _try(label, fn, default=""):
+        try:
+            return fn()
+        except Exception as err:
+            return "%s 读取失败: %s" % (label, str(err)[:80])
+
+    info.append("url: %s" % _try("url", lambda: driver.current_url, "(读不到)"))
+    info.append("title: %s" % _try("title", lambda: driver.title, "(读不到)"))
+    info.append("页面文本: %s" % _try("页面文本", lambda: page_text(driver)[:300], "(读不到)"))
     info.extend("note: %s" % n for n in notes)
 
     try:
         driver.execute_script(
             "document.querySelectorAll('input').forEach(function(e){e.value='';});"
         )
-    except WebDriverException:
+    except Exception:
         pass
 
-    try:
-        html = driver.page_source
-    except WebDriverException as err:
-        html = "page_source 读取失败: %s" % err
+    html = _try("page_source", lambda: driver.page_source, "")
     text = "\n".join(info) + "\n"
     for secret in secrets:
         # 只抹够长的值：短值（如 1、0）会把诊断文本里的数字全打成 ***
@@ -192,8 +393,8 @@ def dump_debug(driver, tag, notes=(), secrets=()):
     _safe_write(prefix + ".html", html)
     try:
         _safe_write(prefix + ".png", driver.get_screenshot_as_png())
-    except WebDriverException as err:
-        print("[WARN] 现场截图失败: %s" % err)
+    except Exception as err:
+        print("[WARN] 现场截图失败: %s" % str(err)[:80])
     print("===> 失败现场已留存: %s.{txt,html,png}" % prefix)
     print(text.strip())
 
@@ -513,18 +714,43 @@ def login_once(driver, username, password, attempt=1):
 
 
 def read_numbers(driver):
-    """读签到页上的矿石数 / 连续天数 / 累计天数；读不到为 None。"""
+    """读签到页上的矿石数 / 连续天数 / 累计天数；读不到为 None。
+
+    走 **DOM 结构**（找标签元素 → 取同卡片内数字），不靠整页文本顺序 ——
+    掘金这三个统计卡是「数字在上、标签在下」，用文本正则配必然串位（见常量注释）。
+    DOM 取不到时才退回文本正则兜底，且兜底正则也是按「数字在前」写的。
+    """
+    values = {"ores": None, "streak": None, "total": None}
+    try:
+        raw = driver.execute_script(SIGNIN_STATS_JS) or {}
+        for key in values:
+            value = raw.get(key)
+            if value:
+                values[key] = str(value)
+    except WebDriverException as err:
+        print("[WARN] DOM 取签到统计失败，退回文本正则: %s" % str(err)[:80])
+
+    if all(values.values()):
+        print("===> 签到统计（DOM）: 矿石=%s 连续=%s 累计=%s"
+              % (values["ores"], values["streak"], values["total"]))
+        return values
+
+    # 兜底：文本正则（数字在前、标签在后）
     text = page_text(driver)
 
     def pick(pattern):
         match = re.search(pattern, text)
         return match.group(1).replace(",", "") if match else None
 
-    return {
-        "ores": pick(ORES_PATTERN),
-        "streak": pick(STREAK_PATTERN),
-        "total": pick(TOTAL_PATTERN),
-    }
+    if not values["ores"]:
+        values["ores"] = pick(ORES_FALLBACK_PATTERN)
+    if not values["streak"]:
+        values["streak"] = pick(STREAK_FALLBACK_PATTERN)
+    if not values["total"]:
+        values["total"] = pick(TOTAL_FALLBACK_PATTERN)
+    print("===> 签到统计（部分走文本兜底）: 矿石=%s 连续=%s 累计=%s"
+          % (values["ores"], values["streak"], values["total"]))
+    return values
 
 
 def sign_in(driver, username="", password=""):
@@ -604,10 +830,391 @@ def sign_in(driver, username="", password=""):
     raise RuntimeError("点击「立即签到」后状态未变化，可能未生效")
 
 
-def notify(bot_id, status, ores="", note=""):
+def read_ores_badge(driver):
+    """读抽奖页顶部的**矿石数胶囊**（截图那个 55210）。
+
+    ⚠️ 2026-09-29 第三轮线上又读错了（读到 `2026`，实际 `55210`），根因两条：
+      1. 转盘页的胶囊**邻近没有「矿石」二字** —— 截图看就是「🔶 图标 + 55210」，纯图标没标签。
+         所以我原来「优先邻近有矿石字样」的策略在这一页**全部落空**；
+      2. 落空后掉到「整页文案里 矿石(\\d+)」的兜底正则，而它抓到的是页面**别处**的
+         `2026`（年份 —— 「© 2026 稀土掘金」！），于是把版权年份当成了矿石数。
+
+    正确做法（按页面结构，而不是猜）：
+      抽奖页的矿石胶囊**一定在页面最上方**（banner 里）。所以取「可见纯数字叶子」中
+      **y 最小**的那个即可，语义排除词表负责挡掉 `等级/JY/次数/十连/年份` 这些干扰。
+    兜底正则也一并收紧：`矿石 数字` 只认「紧贴矿石二字」的，且**排除 19xx/20xx 年份形态**。
+    """
+    try:
+        candidates = driver.execute_script(ORES_INLINE_JS) or []
+    except WebDriverException as err:
+        candidates = []
+        print("[WARN] 扫描矿石数胶囊失败: %s" % str(err)[:80])
+
+    usable = [c for c in candidates if isinstance(c, dict) and c.get("v")]
+    # 排序：位置越靠上越可能是胶囊（banner 在第一屏顶部）
+    ranked = sorted(usable, key=lambda c: float(c.get("y") or 0))
+
+    for cand in usable:
+        # 先信任「邻近有矿石字样」的（签到页那种带标签的形态）
+        if cand.get("hit") and len(cand["v"]) >= 3:
+            print("===> 矿石数胶囊取值: %s（y=%s，邻近矿石字样=1）"
+                  % (cand["v"], cand.get("y")))
+            return cand["v"]
+
+    # 转盘页的主路径：**最靠上的大数字**就是胶囊（不再依赖「矿石」字样）
+    for cand in ranked:
+        if len(cand["v"]) >= 4 and not _looks_like_year(cand["v"]):
+            print("===> 矿石数胶囊取值（页面最上方大数字）: %s（y=%s）"
+                  % (cand["v"], cand.get("y")))
+            return cand["v"]
+
+    # 兜底：整页文案里紧贴「矿石」的数字（且不是年份形态）
+    text = page_text(driver)
+    for match in re.finditer(r"矿石[^\d]{0,6}(\d[\d,]{2,})", text):
+        value = match.group(1).replace(",", "")
+        if not _looks_like_year(value):
+            print("===> 矿石数（整页正则兜底）: %s" % value)
+            return value
+
+    for cand in ranked:
+        if len(cand["v"]) >= 4:
+            print("===> 矿石数（弱候选，请核对）: %s（y=%s）" % (cand["v"], cand.get("y")))
+            return cand["v"]
+    return None
+
+
+def _looks_like_year(value):
+    """排除 `2026` 这类版权年份 —— 2026-09-29 线上就是被「© 2026 稀土掘金」坑的。
+
+    只把 1900~2099 的**四位整数**当年份；五位以上（55210）一律不误伤。
+    """
+    if len(value) != 4:
+        return False
+    return 1900 <= int(value) <= 2099
+
+
+def goto_growth_center(driver, username="", password=""):
+    """签到页 → 点左侧菜单「幸运抽奖」→ 转盘页。返回是否成功进入（**以页面内容为准**）。
+
+    ⚠️ 2026-09-29 两轮线上实测的血泪（别改回去）：
+      第 1 轮走「头像菜单 → 成长福利」→ 跳到 `/user/center/growth`，那页是
+      **「成长等级」**（掘友分/等级权益），**没有转盘**，于是「未找到抽奖按钮」。
+      第 2 轮 lodge 截图指正：转盘页入口是**签到页左侧菜单的「幸运抽奖」**，
+      点它到 `/user/center/lottery`。
+    所以现在的顺序：
+      1. 打开签到页 → 点左侧菜单「幸运抽奖」；
+      2. 点不到 → 直接 `GET /user/center/lottery`；
+      3. 两个都到不了 → 才退回头像菜单那条老路（跳 /growth，通常没用）。
+    **进没进对的判据是页面内容**（有「幸运大转盘/免费抽奖次数」且**没有**「掘友分明细」
+    这类成长等级文案），不能只看 URL —— 上一轮就是 URL 命中 `/growth` 但页面全错。
+    """
+    driver.get(SIGNIN_URL)
+    time.sleep(3)
+    if not wait_url(driver, "/signin", 15):
+        print("[WARN] 签到页 URL 未落地，仍继续尝试进抽奖页")
+
+    # A 方案（官方路径）：签到页左侧菜单「幸运抽奖」
+    menu, menu_hit = wait_visible(driver, LOTTERY_MENU_XPATHS, 10, "左侧菜单「幸运抽奖」")
+    if menu is None:
+        print("[WARN] 签到页左侧菜单没找到「幸运抽奖」，直接打开 %s" % LOTTERY_URL)
+        driver.get(LOTTERY_URL)
+    else:
+        print("===> 找到左侧菜单「幸运抽奖」（选择器 %s），点击进入" % menu_hit)
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", menu)
+            menu.click()
+        except WebDriverException as err:
+            print("[WARN] 常规点击失败(%s)，改用 JS 点击" % str(err)[:60])
+            try:
+                driver.execute_script("arguments[0].click();", menu)
+            except WebDriverException as err2:
+                print("[WARN] JS 点击也失败: %s，改为直接打开 URL" % str(err2)[:60])
+                driver.get(LOTTERY_URL)
+        time.sleep(3)
+        # 点了没跳转就直接开 URL（同一个登录态，等价）
+        if "lottery" not in (driver.current_url or ""):
+            print("===> 菜单点击未跳转，直接打开 %s" % LOTTERY_URL)
+            driver.get(LOTTERY_URL)
+
+    time.sleep(3)
+    if _on_lottery_page(driver):
+        print("===> 已进入幸运抽奖页（%s）" % driver.current_url)
+        return True
+
+    # B 方案（兜底，通常没用）：头像菜单 →「成长福利」。留着只为菜单改版时不至于全挂。
+    print("[WARN] %s 不是抽奖页，退回头像菜单方式试一次" % driver.current_url)
+    _try_avatar_menu(driver)
+
+    time.sleep(3)
+    ok = _on_lottery_page(driver)
+    if not ok:
+        dump_debug(
+            driver,
+            "lottery_page_not_entered",
+            notes=[
+                "没能进入幸运抽奖页",
+                "当前 URL: %s" % driver.current_url,
+                "页面文本首 200 字: %s" % page_text(driver)[:200],
+            ],
+            secrets=(username, password),
+        )
+    print("===> 抽奖页: %s（%s）" % ("已进入" if ok else "未能进入", driver.current_url))
+    return ok
+
+
+def _on_lottery_page(driver):
+    """当前页面是不是**真的**抽奖页。
+
+    双向判据，缺一不可（2026-09-29 只看 URL 吃过亏）：
+      · 正：出现转盘特征文案（幸运大转盘 / 免费抽奖次数 / 十连抽 / 围观大奖）
+      · 反：**没有**成长等级页的文案（掘友分明细 / 等级规则 / 等级权益 / 升级行为）
+    """
+    text = page_text(driver)
+    if any(marker in text for marker in LOTTERY_WRONG_PAGE_MARKERS):
+        print("[WARN] 检测到「成长等级」页文案，判定不是抽奖页")
+        return False
+    hit = [m for m in LOTTERY_PAGE_MARKERS if m in text]
+    if hit:
+        print("===> 抽奖页特征命中: %s" % ", ".join(hit))
+        return True
+    return False
+
+
+def _try_avatar_menu(driver):
+    """兜底路径：点头像 →「成长福利」。**跳的是 /growth（成长等级页），大概率没用**，
+    所以调用方必须再用 `_on_lottery_page` 复核，不能靠它返回真假。"""
+    avatar, hit = wait_visible(driver, AVATAR_XPATHS, 8, "头像")
+    if avatar is None:
+        print("[WARN] 没找到头像元素")
+        return
+    print("===> 兜底：点击头像展开菜单（%s）" % hit)
+    try:
+        avatar.click()
+    except WebDriverException:
+        try:
+            driver.execute_script("arguments[0].click();", avatar)
+        except WebDriverException as err:
+            print("[WARN] 点击头像失败: %s" % str(err)[:60])
+            return
+    time.sleep(1.5)
+    entry, entry_hit = wait_visible(driver, GROWTH_MENU_XPATHS, 6, "「成长福利」菜单项")
+    if entry is None:
+        print("[WARN] 头像菜单里没有「成长福利」")
+        return
+    print("===> 兜底：点击「成长福利」（%s）" % entry_hit)
+    try:
+        entry.click()
+        time.sleep(3)
+    except WebDriverException as err:
+        print("[WARN] 点击「成长福利」失败: %s" % str(err)[:60])
+
+
+def lottery_free_draw(driver, username="", password=""):
+    """点一次「免费抽奖次数：N 次」，返回 (状态文案, 奖励文案)。
+
+    2026-09-29 第三轮线上后**按 lodge 要求简化**：他明确说
+    「现在抽奖可以正常，实际就是没有抽奖反馈。**不用获取抽奖确认**」。
+    所以这里**点完就返回**，不再等结果、不再判成功 —— 之前那套 25 秒轮询
+    等「免费次数变小 / 按钮转已抽完 / 矿石变化 / 弹层奖品」，在他那边判定
+    「抽奖未确认」，而实际抽奖是成功的（截图能看到转盘转动、次数已经消耗）。
+    结论：**等待与确认这段是多余复杂度**，删掉。
+
+    保留的仍然有价值的部分：
+      · 点之前先判「今日已抽完」→ 跳过（避免重复点，也避免白撞接口）；
+      · 点之前读一次**免费次数与矿石数**，打进日志便于人工核对；
+      · 按钮定位仍走 `_find_lottery_button`（不误命中左侧菜单）。
+
+    返回的「奖励文案」现在只是**抽完后重读的矿石数**，供卡片展示参考。
+    """
+    # ⚠️ 顺序要紧：**先判「今日已抽完」再去找按钮**。
+    # 反过来的话，模糊选择器会把左侧菜单的「幸运抽奖」当成按钮命中，点它等于空点。
+    text = page_text(driver)
+    if any(marker in text for marker in LOTTERY_DONE_MARKERS):
+        print("===> 页面已出现已抽完文案，判定今日已抽过")
+        return "今日已抽完（跳过）", ""
+
+    before_free = read_free_draws(driver)
+    before_ores = read_ores_badge(driver)
+    print("===> 抽奖前: 免费次数=%s 矿石数=%s"
+          % (before_free if before_free is not None else "未读取到", before_ores or "未读取到"))
+
+    button = _find_lottery_button(driver)
+    if button is None:
+        dump_debug(
+            driver,
+            "lottery_no_button",
+            notes=["抽奖页未找到「免费抽奖次数」按钮（页面结构可能变了）"],
+            secrets=(username, password),
+        )
+        return "抽奖失败（未找到抽奖按钮）", ""
+
+    button_text = _element_text(driver, button)
+    print("===> 找到抽奖按钮: %r" % button_text)
+    if any(marker in button_text for marker in LOTTERY_DONE_MARKERS):
+        return "今日已抽完（跳过）", ""
+
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+    time.sleep(0.5)
+    # 按钮是动画元素（转盘转动时会位移），click 可能报 element click intercepted —— 降级用 JS 点
+    clicked = False
+    try:
+        button.click()
+        clicked = True
+    except WebDriverException as err:
+        print("[WARN] 常规点击失败(%s)，改用 JS 点击" % str(err)[:60])
+        try:
+            driver.execute_script("arguments[0].click();", button)
+            clicked = True
+        except WebDriverException as err2:
+            print("[WARN] JS 点击也失败: %s" % str(err2)[:60])
+    if not clicked:
+        return "抽奖失败（按钮点击失败）", ""
+    print("===> 已点击「%s」" % button_text)
+
+    # 给转盘一点转动时间，再重读一次矿石数（只为展示，不参与判定）
+    time.sleep(5)
+    after_ores = read_ores_badge(driver) or before_ores
+    if before_ores and after_ores and after_ores != before_ores:
+        print("===> 矿石数变化: %s → %s" % (before_ores, after_ores))
+        return "已抽奖（免费 1 次）", "矿石 %s → %s" % (before_ores, after_ores)
+    print("===> 已抽奖，矿石数未变化（可能抽到的是券/实物）")
+    return "已抽奖（免费 1 次）", ""
+
+
+def read_free_draws(driver):
+    """读「免费抽奖次数: N」里的 N。读不到返回 None。
+
+    这是判断「这次抽奖到底有没有发生」的**硬证据**，所以单独抓。
+    在浏览器里扫可见文本，找「免费抽奖次数」后紧跟的整数。
+    """
+    js = """
+    var re = /免费抽奖次数[^\\d]{0,6}(\\d+)/;
+    var walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    var n, out = null;
+    while ((n = walk.nextNode())) {
+      var r = re.exec(n.textContent || '');
+      if (r) { out = parseInt(r[1], 10); break; }
+    }
+    return out;
+    """
+    try:
+        return driver.execute_script(js)
+    except WebDriverException:
+        return None
+
+
+def _find_lottery_button(driver):
+    """找「免费抽奖次数：N 次」那个按钮。
+
+    ⚠️ 这里刻意**不用「抽奖」二字模糊匹配** —— 左侧导航的「幸运抽奖」菜单项也含这两个字，
+    2026-09-29 线上连栽两轮（第一版命中它、第二版加了 menu/nav 排除仍然命中，因为线上那个
+    菜单项外层全是构建哈希类名、也没有 nav/menu 字样）。改为按**按钮独有文案**定位，
+    并对候选做**结构校验**：必须是 button，或位于转盘容器内，或文案里带次数。
+    找不到返回 None（由调用方决定 dump/报错），绝不退化成「页面任意含抽奖的元素」。
+    """
+    for xpath in LOTTERY_BUTTON_XPATHS:
+        try:
+            for element in driver.find_elements(By.XPATH, xpath):
+                if not element.is_displayed():
+                    continue
+                text = _element_text(driver, element)
+                if not text:
+                    continue
+                # 左侧导航菜单项必杀：文案恰好是「幸运抽奖」「福利兑换」这种菜单名，
+                # 或它自身/父链上是链接，一律排除。
+                if text in ("幸运抽奖", "福利兑换", "我的收获", "每日签到", "成长等级", "社区排行榜"):
+                    continue
+                tag = (element.tag_name or "").lower()
+                if tag not in ("button", "a", "div", "span"):
+                    continue
+                if tag == "a":
+                    continue
+                # 结构/文案校验：三者之一即可
+                ok = (
+                    tag == "button"
+                    or "免费抽奖次数" in text
+                    or _in_lottery_container(driver, element)
+                )
+                if ok:
+                    print("===> 抽奖按钮命中: %r（tag=%s, xpath=%s）" % (text, tag, xpath))
+                    return element
+        except WebDriverException:
+            continue
+    return None
+
+
+def _in_lottery_container(driver, element):
+    """元素是否位于转盘/抽奖容器内（靠类名或祖先文案含「幸运大转盘」判断）。"""
+    js = """
+    var el = arguments[0];
+    var p = el;
+    for (var i = 0; i < 6 && p; i++, p = p.parentElement) {
+      var cls = (p.className && p.className.toString) ? p.className.toString() : '';
+      if (/lottery|wheel|prize|draw|turntable/i.test(cls)) return true;
+    }
+    // 再退一层：祖先里有没有「幸运大转盘」这段文案（容器类名不可靠时的兜底）
+    p = el;
+    for (var j = 0; j < 6 && p; j++, p = p.parentElement) {
+      if ((p.textContent || '').indexOf('幸运大转盘') >= 0) return true;
+    }
+    return false;
+    """
+    try:
+        return bool(driver.execute_script(js, element))
+    except WebDriverException:
+        return False
+
+
+def _element_text(driver, element):
+    """读元素可见文本（textContent 兜底，掘金 SPA 下 element.text 常为空）。"""
+    try:
+        text = (element.text or "").strip()
+        if text:
+            return text
+        return (driver.execute_script("return arguments[0].textContent || '';", element) or "").strip()
+    except WebDriverException:
+        return ""
+
+
+def growth_center(driver, username="", password=""):
+    """进抽奖页 → 读矿石数 → 免费抽奖一次。
+
+    返回 (矿石数, 抽奖状态, 奖品文案)。**任何一步失败都不抛异常** ——
+    签到已经成功了，抽奖挂掉不该把当天的签到判成失败（见模块头注释）。
+    """
+    if not LOTTERY_ENABLED:
+        print("===> JUEJIN_LOTTERY=0，跳过抽奖（只读矿石数）")
+
+    try:
+        if not goto_growth_center(driver, username, password):
+            # goto_growth_center 内部已经 dump 过现场，这里不再重复 dump
+            return "", "抽奖失败（未进入幸运抽奖页）", ""
+
+        ores = read_ores_badge(driver) or ""
+        print("===> 抽奖页矿石数: %s" % (ores or "未读取到"))
+        if not LOTTERY_ENABLED:
+            return ores, "已关闭（JUEJIN_LOTTERY=0）", ""
+
+        status, reward = lottery_free_draw(driver, username, password)
+        # 抽奖可能改变矿石数，重读一次拿最新的（随机矿石奖会涨）
+        ores = read_ores_badge(driver) or ores
+        print("===> 抽奖结果: %s %s（矿石数 %s）" % (status, reward, ores or "未读取到"))
+        return ores, status, reward
+    except Exception as err:
+        # 这一层是刻意的宽口径：抽奖整段都不该把签到结论带崩
+        print("[WARN] 抽奖流程异常（不影响签到结论）: %s" % err)
+        dump_debug(driver, "growth_error", notes=[repr(err)], secrets=(username, password))
+        return "", "抽奖失败（%s）" % str(err)[:60], ""
+
+
+def notify(bot_id, status, ores="", note="", lottery="", reward=""):
     """推一张飞书卡片。推送失败只告警，绝不因此把签到判成失败。"""
     content = ["**签到状态**: %s" % status]
     content.append("**当前矿石数**: %s" % (ores or "未读取到"))
+    if lottery:
+        content.append("**免费抽奖**: %s" % lottery)
+    if reward:
+        content.append("**抽奖奖励**: %s" % reward)
     if note:
         content.append("**错误信息**: %s" % note)
     content.append("**时间**: %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -658,6 +1265,8 @@ def juejin(username="", password="", cookie="", bot_id=""):
     status = "签到失败"
     note = ""
     ores = ""
+    lottery = ""
+    reward = ""
     driver = get_web_driver()
     try:
         # 优先账号密码（会自动过滑块验证码）；滑块被行为风控拦下时，若配了 Cookie 就降级用它
@@ -703,6 +1312,13 @@ def juejin(username="", password="", cookie="", bot_id=""):
         status, numbers = sign_in(driver, username, password)
         ores = numbers.get("ores") or ""
         print("===> 签到结果: %s（矿石数 %s）" % (status, ores or "未读取到"))
+
+        # 签到成功后再进福利中心：读最新矿石数 + 免费抽奖一次（失败不影响签到结论）。
+        # 「今日已签到」也照抽 —— 抽奖是每天一次，跟签到是两件事。
+        center_ores, lottery, reward = growth_center(driver, username, password)
+        # 福利中心顶部胶囊的矿石数是**抽奖后**的最新值，比签到页文案更准，优先用它
+        ores = center_ores or ores
+        print("===> 最终矿石数: %s / 抽奖: %s %s" % (ores or "未读取到", lottery, reward))
     except Exception as err:
         status = "签到失败"
         note = str(err)[:200]
@@ -713,7 +1329,7 @@ def juejin(username="", password="", cookie="", bot_id=""):
         except Exception as err:
             print("[WARN] 关闭浏览器失败: %s" % err)
         if bot_id:
-            notify(bot_id, status, ores, note)
+            notify(bot_id, status, ores, note, lottery, reward)
 
 
 if __name__ == "__main__":

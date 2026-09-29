@@ -52,7 +52,7 @@ jobs:
         run: |
           echo "chrome: $(google-chrome --version 2>/dev/null || google-chrome-stable --version 2>/dev/null || echo 'chrome not found')"
           echo "chromedriver: $(chromedriver --version 2>/dev/null || echo 'chromedriver not found')"
-          python -B -m Selenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }} ${{ secrets.FEISHU_BOT_ID }} && echo "PY_OK=true" >> $GITHUB_ENV || echo "PY_FAILED=true" >> $GITHUB_ENV
+          python -B -m Selenium.Futu.SeedFarm ${{ secrets.FUTU_USERNAME }} ${{ secrets.FUTU_PASSWORD }} ${{ secrets.FEISHU_WEBHOOK_URL }} && echo "PY_OK=true" >> $GITHUB_ENV || echo "PY_FAILED=true" >> $GITHUB_ENV
 
       - name: 📦 Upload debug artifacts
         if: always() && env.PY_FAILED == 'true'

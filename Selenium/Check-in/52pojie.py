@@ -36,9 +36,11 @@
 
 可选环境变量：
     PJ52_COOKIE         登录态 Cookie，形如 `name=value; name2=value2`（唯一必需项）
-    FEISHU_BOT_ID       飞书机器人 webhook，给了才推卡片（卡片含签到状态 + 当前积分 + 回帖结果）
+    FEISHU_BOT_ID       飞书机器人 webhook，给了才推卡片
+                        （卡片含签到状态 + 当前积分 + 吾爱币 + 回帖结果）
     PJ52_TASK_URL       签到任务地址，默认 home.php?mod=task&do=apply&id=2
     PJ52_DRAW_URL       任务奖励领取地址，默认 home.php?mod=task&do=draw&id=2
+    PJ52_CREDIT_URL     「我的积分」页，读吾爱币用，默认 home.php?mod=spacecp&ac=credit
     PJ52_WAF_ROUNDS     单次过 WAF 的验证码重试上限，默认 8
     PJ52_WAF_ATTEMPTS   过完验证码又被拦回来的重试次数，默认 3
     PJ52_FORUM_URL      回帖板块，默认 forum-16-1.html（『精品软件区』）
@@ -85,6 +87,10 @@ TASK_URL = os.getenv(
 )
 DRAW_URL = os.getenv(
     "PJ52_DRAW_URL", "https://www.52pojie.cn/home.php?mod=task&do=draw&id=2"
+)
+# 设置 → 积分页：吾爱币数量只在这里看得到（页头那个「积分」是总积分，两者不同）
+CREDIT_URL = os.getenv(
+    "PJ52_CREDIT_URL", "https://www.52pojie.cn/home.php?mod=spacecp&ac=credit"
 )
 # 回帖得积分的目标板块，默认『精品软件区』（fid=16）
 FORUM_URL = os.getenv("PJ52_FORUM_URL", "https://www.52pojie.cn/forum-16-1.html")
@@ -648,6 +654,107 @@ def read_points(driver):
     return ""
 
 
+# 吾爱币挂在设置 → 积分页（`home.php?mod=spacecp&ac=credit`）。
+# ⚠️ 页头上的「积分: 57」是**总积分**（=发帖数×0.1 + 热心值×1.2 + 悬赏×1.5 + 贡献×1.5
+#    + 威望×20 + 精华帖数×100 - 违规×20），跟吾爱币不是一回事，所以不能从页头推。
+# 
+
+# 页面里「我的积分」区块的标题形如 `吾爱币: 413 CB 帮助>`，数字在 <em> 里。
+# 三层兜底，从最精确到最宽松：
+#   1. 区块里 .credit_num 的纯数字；
+#   2. 「吾爱币」后面的数字（取该节点之后最近的数字，兼容「标签—数值」分列的结构）；
+#   3. 整页文本里 `吾爱币[:：]?\s*(\d[\d,]*)`。
+# ⚠️ 顺序不能反：整页正则最容易误伤（右侧栏常同时挂着「贡献值 / 热心值 / 悬赏值」，
+#    数值全是四位以内，一旦哪个标签文案变了就会串位 —— 掘金那边踩过同样的坑）。
+CREDIT_SECTION_XPATHS = (
+    "//*[@id='ct']",
+    "//*[contains(@class,'credit')]",
+)
+CREDIT_EXTRACT_JS = r"""
+    function pick(re) {
+      return function(t) {
+        if (!t) return '';
+        var m = String(t).replace(/,/g, '').match(re);
+        return m ? m[1] : '';
+      };
+    }
+    var grabNum = pick(/(\d+)/);
+    var grabCoin = pick(/吾爱币[:：]?\s*(\d[\d,]*)/);
+
+    // 候选区块：设置页的主体区域
+    var scopes = [];
+    ['ct'].forEach(function(id){
+      var e = document.getElementById(id);
+      if (e) scopes.push(e);
+    });
+    document.querySelectorAll("[class*='credit']").forEach(function(e){ scopes.push(e); });
+    if (!scopes.length) scopes.push(document.body);
+
+    for (var i = 0; i < scopes.length; i++) {
+      var scope = scopes[i];
+      // 1) 精确类名：.credit_num / .credit_num_1（Discuz 老模板的「我的积分」数值格）
+      var nums = scope.querySelectorAll(
+        ".credit_num, [class^='credit_num'], [class*=' credit_num']");
+      if (nums.length) {
+        var first = grabNum(nums[0].textContent);
+        if (first) return first;
+      }
+      // 2) 文本节点里带「吾爱币」的，取它后面最近的数字
+      var walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walker.nextNode())) {
+        var t = (node.textContent || '').trim();
+        if (t.indexOf('吾爱币') < 0) continue;
+        var inline = grabCoin(t);
+        if (inline) return inline;
+        // 标签和数字分列（本页就是这种）：顺着 DOM 往后找第一个纯数字节点
+        var probe = node.parentNode;
+        var hops = 0;
+        while (probe && hops++ < 6) {
+          var hit = probe.parentNode ? probe.parentNode : null;
+          var found = '';
+          if (hit) {
+            hit.childNodes.forEach(function(c){
+              if (found) return;
+              if (c.nodeType === 3) {
+                var v = grabNum(c.textContent);
+                if (v) found = v;
+              }
+            });
+          }
+          if (found) return found;
+          probe = probe.parentNode;
+        }
+      }
+    }
+    // 3) 整页兜底
+    return grabCoin(document.body ? document.body.textContent : '') || '';
+"""
+
+
+def read_credits(driver, url=""):
+    """读「我的积分」页里的**吾爱币**数量（截图上红框那行：`吾爱币: 413 CB`）。
+
+    读不到就返回空串 —— 吾爱币只是卡片上的信息，绝不因此把签到判成失败。
+    页面本身也会把真实结构写进失败现场（dump_debug），够排查。
+    """
+    url = url or CREDIT_URL
+    if not pass_waf(driver, url):
+        print("[WARN] 积分页 WAF 未通过，跳过吾爱币读取")
+        return ""
+    wait_document_ready(driver)
+    time.sleep(1.0)
+
+    try:
+        value = (driver.execute_script(CREDIT_EXTRACT_JS) or "").strip()
+    except WebDriverException as err:
+        print("[WARN] 读取吾爱币失败: %s" % err)
+        return ""
+    if not value:
+        print("[WARN] 没在积分页读到吾爱币（当前: %s）" % driver.current_url)
+    return value
+
+
 def pick_thread(driver, forum_url, secrets=()):
     """在板块列表第一页里随机挑一个普通帖，返回 (标题, 链接)。
 
@@ -939,10 +1046,11 @@ def reply_thread(driver, url, text, secrets=()):
     raise RuntimeError("点击发表回复后状态未明（%s）" % (detail[:120] or "空"))
 
 
-def notify(bot_id, status, note="", points="", reply=""):
+def notify(bot_id, status, note="", points="", reply="", credits=""):
     """推一张飞书卡片。推送失败只告警，绝不因此把签到判成失败。"""
     content = ["**签到状态**: %s" % status]
     content.append("**当前积分**: %s" % (points or "未读取到"))
+    content.append("**吾爱币**: %s" % ("%s CB" % credits if credits else "未读取到"))
     if reply:
         content.append("**回帖**: %s" % reply)
     if note:
@@ -985,6 +1093,7 @@ def pojie52(cookie="", bot_id=""):
     status = "签到失败"
     note = ""
     points = ""
+    credits = ""
     reply_status = ""
     driver = get_web_driver()
     try:
@@ -1030,13 +1139,6 @@ def pojie52(cookie="", bot_id=""):
         status = sign_in(driver, secrets)
         print("===> 签到结果: %s" % status)
 
-        # 积分：签到页跳转后回到首页读页头的「积分: NN」
-        driver.get(HOME_URL)
-        pass_waf(driver, HOME_URL)
-        time.sleep(1)
-        points = read_points(driver)
-        print("===> 当前积分: %s" % (points or "未读取到"))
-
         if REPLY_ENABLE:
             title, href = pick_thread(driver, FORUM_URL, secrets)
             try:
@@ -1052,6 +1154,17 @@ def pojie52(cookie="", bot_id=""):
             print("===> 回帖结果: %s" % reply_status)
         else:
             print("===> PJ52_REPLY=0，跳过回帖")
+
+        # 积分/吾爱币放在**回帖之后**读：回帖本身 +1 吾爱币，
+        # 先读的话卡片上就是回帖前的旧值（lodge 2026-09-29 要求读的是回帖后的数）。
+        driver.get(HOME_URL)
+        pass_waf(driver, HOME_URL)
+        time.sleep(1)
+        points = read_points(driver)
+        print("===> 当前积分: %s" % (points or "未读取到"))
+
+        credits = read_credits(driver)
+        print("===> 当前吾爱币: %s" % ("%s CB" % credits if credits else "未读取到"))
     except Exception as err:
         status = "签到失败"
         note = str(err)[:200]
@@ -1062,7 +1175,7 @@ def pojie52(cookie="", bot_id=""):
         except Exception as err:
             print("[WARN] 关闭浏览器失败: %s" % err)
         if bot_id:
-            notify(bot_id, status, note, points, reply_status)
+            notify(bot_id, status, note, points, reply_status, credits)
 
 
 if __name__ == "__main__":
