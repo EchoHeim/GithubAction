@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       ping:
-        description: "自检：验飞书 webhook + DeepSeek 模型/Key 连通性（不抓榜单）"
+        description: "自检：验飞书通道 + DeepSeek 模型/Key 连通性（不抓榜单）"
         type: boolean
         default: false
       dry_run:
-        description: "只跑抓取和落盘，不调模型、不推送"
+        description: "只跑抓取和解析，不调模型、不推送（打印卡片预览）"
         type: boolean
         default: false
       top:
@@ -33,9 +33,9 @@ on:
           - daily
           - monthly
 
-# 写回 articles/ 需要写权限（Settings -> Actions -> Workflow permissions 选 Read and write）
+# 内容只推飞书、不再向仓库回写任何文件，读权限即可
 permissions:
-  contents: write
+  contents: read
 
 # 避免上一次没跑完就叠一次
 concurrency:
@@ -55,11 +55,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: "Install dependencies"
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
-
+      # 脚本只用标准库（urllib），无需 pip install 任何依赖
       - name: "Generate weekly article and push to Feishu"
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -68,8 +64,14 @@ jobs:
           # 一般不用设；设了会覆盖默认模型并跳过可用性核对
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
           # 选题要横向比较并权衡"读者用不用得上"，推文要消化成可读的推广文——都需要思考模式。
-          # DeepSeek 默认本就开启；这里显式写 '1' 只是防止有人误设为 0。设 0 可省时省钱但质量下降。
           DEEPSEEK_THINKING: ${{ vars.DEEPSEEK_THINKING || '1' }}
+          # 飞书自建应用机器人（推荐通道）：以下三项齐全才会启用
+          FEISHU_GITHUB_ACTION_APP_ID: ${{ secrets.FEISHU_GITHUB_ACTION_APP_ID }}
+          FEISHU_GITHUB_ACTION_APP_SECRET: ${{ secrets.FEISHU_GITHUB_ACTION_APP_SECRET }}
+          FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
+          # 可选，默认 chat_id；也可填 open_id / user_id / email
+          FEISHU_RECEIVE_ID_TYPE: ${{ vars.FEISHU_RECEIVE_ID_TYPE }}
+          # 兜底通道：没配应用凭证时回退到自定义机器人 webhook（只能发卡片，发不了源文件）
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           FEISHU_SIGN_KEY: ${{ secrets.FEISHU_SIGN_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,26 +85,3 @@ jobs:
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           echo "run: python Trending/trending_article.py $ARGS"
           python Trending/trending_article.py $ARGS
-
-      - name: "Commit article"
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add articles latest.md
-          if git diff --staged --quiet; then
-            echo "没有内容变化，跳过提交"
-          else
-            git commit -m "docs: trending weekly $(TZ='Asia/Shanghai' date '+%G-W%V')"
-            git push
-          fi
-
-      - name: "Upload article as artifact"
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trending-article-${{ github.run_id }}
-          path: |
-            articles/
-            latest.md
-          if-no-files-found: ignore
-          retention-days: 30

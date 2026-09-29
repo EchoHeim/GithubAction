@@ -1,26 +1,39 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""GitHub Trending 周榜 -> DeepSeek 写推文 -> 飞书推送
+"""GitHub Trending 周榜 -> DeepSeek 写推文 -> 飞书推送源文件
 
 一条流水线，每周六早 6 点（北京时间）跑一次：
     抓 GitHub Trending 近一周（since=weekly）热度最高的项目
-    -> 拉元信息 + README -> DeepSeek 生成公众号推文 Markdown
-    -> 落盘 articles/YYYY-Www.md + latest.md -> 推送到飞书群机器人
+    -> 拉元信息 + README -> DeepSeek 生成 1500~2000 字的公众号推文 Markdown
+    -> 作为 .md 源文件发给飞书（自建应用机器人；没配就退回 webhook 卡片）
+
+**内容不落盘到仓库**：飞书是唯一出口，所以推送失败时脚本以退出码 1 结束，
+让 Actions 标红——避免"跑了但什么都没产出"被静默吞掉。
 
 用法：
-    python Trending/trending_article.py --dry-run      # 不调 LLM、不推送，只验证抓取+落盘
+    python Trending/trending_article.py --dry-run      # 不调 LLM、不推送，只验证抓取并预览源文件
     python Trending/trending_article.py               # 全流程（默认 weekly）
     python Trending/trending_article.py --since daily --top 3 --no-push
 
 环境变量：
-    DEEPSEEK_API_KEY   必填（全流程时）。--dry-run 可缺省
-    DEEPSEEK_BASE_URL  可选，默认 https://api.deepseek.com
-    DEEPSEEK_MODEL     可选，留空则用 GET /models 自动探测（首选 deepseek-flash）
-    DEEPSEEK_THINKING  可选，默认 0（关闭思考模式）。写推文不需要思维链
+    DEEPSEEK_API_KEY          必填（全流程时）。--dry-run 可缺省
+    DEEPSEEK_BASE_URL         可选，默认 https://api.deepseek.com
+    DEEPSEEK_MODEL            可选，留空则用 GET /models 自动探测（首选 deepseek-flash）
+    DEEPSEEK_THINKING         可选，默认开启
     DEEPSEEK_REASONING_EFFORT 可选，仅在开启思考模式时生效，默认 high
-    FEISHU_WEBHOOK_URL 可选。缺省时只落盘不推送
-    FEISHU_SIGN_KEY    可选，机器人开启"签名校验"时必填
-    GH_TOKEN           可选，GitHub API 兜底/提额（每小时 60 -> 5000 次）
+
+    FEISHU_GITHUB_ACTION_APP_ID      自建应用 App ID      ┐
+    FEISHU_GITHUB_ACTION_APP_SECRET  自建应用 App Secret  ├ 三项齐全则走应用机器人
+    FEISHU_RECEIVE_ID                目标会话 ID          ┘
+    FEISHU_RECEIVE_ID_TYPE           可选，默认 chat_id（也可 open_id / user_id / email）
+    FEISHU_WEBHOOK_URL               可选，没配应用时的兜底通道（只能发卡片，发不了文件）
+    FEISHU_SIGN_KEY                  可选，webhook 开了"签名校验"时必填
+    GH_TOKEN                         可选，GitHub API 兜底/提额（每小时 60 -> 5000 次）
+
+飞书应用需要的权限：
+    im:message（或 im:message:send_as_bot）  发消息
+    im:resource                             上传文件 —— 发源文件必需
+    im:chat:readonly                        --ping 列群用，可选
 
 退出码：0 成功（含降级成功）；1 关键步骤失败
 """
@@ -40,15 +53,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 # ---------------------------------------------------------------- 常量配置
 
 CST = timezone(timedelta(hours=8))  # 固定 +8，避免依赖系统 tzdata
-ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = ROOT / "articles"
-LATEST = ROOT / "latest.md"
+
+# 飞书自建应用凭证的环境变量名。以仓库里实际配置的为准，旧名保留兼容。
+FEISHU_APP_ID_ENVS = ("FEISHU_GITHUB_ACTION_APP_ID", "FEISHU_APP_ID")
+FEISHU_APP_SECRET_ENVS = ("FEISHU_GITHUB_ACTION_APP_SECRET", "FEISHU_APP_SECRET")
 
 TRENDING_URL = "https://github.com/trending"
 UA = "Mozilla/5.0 (compatible; TrendingBot/1.0; +https://github.com)"
@@ -58,6 +72,19 @@ FEISHU_MD_LIMIT = 4500     # 飞书卡片 markdown 正文字符上限（留足 2
 HTTP_TIMEOUT = 30
 LLM_TIMEOUT = 120
 LLM_RETRIES = 3
+# 输出 token 预算。思考模式下思维链与正文共享这一份额度，给足余量，
+# 否则正文会被拦腰截断（W40 那期就是 3000 不够用所致）。
+LLM_MAX_TOKENS = 12000
+# 万一还是撞上 max_tokens，最多追加几轮"接着写"
+CONTINUE_ROUNDS = 1
+# 交付前完整性兜底：prompt 要求 1500~2000 字，低于这个数就告警（不改写）
+ARTICLE_MIN_CHARS = 1200
+# 续写时追加的指令，尽量让它接着上文走而不是重头再来
+CONTINUE_PROMPT = (
+    "你上一次的输出因为长度限制被截断了。请**从中断处直接接着写**，"
+    "补完剩余部分；不要重复已经写过的内容，不要重新开头，"
+    "不要输出任何解释、说明或代码块围栏。"
+)
 
 # /models 探测结果缓存（key: (base_url, api_key)），避免同一轮重复探测
 _MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
@@ -82,6 +109,15 @@ DEFAULT_CANDIDATES = 12   # 候选池大小（榜单名次范围）
 
 
 # ---------------------------------------------------------------- 工具函数
+
+def env_first(names: tuple[str, ...]) -> str:
+    """按顺序取第一个非空的环境变量值；都为空则返回空串。"""
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
 
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -125,10 +161,13 @@ def http_get(url: str, headers: dict | None = None, timeout: int = HTTP_TIMEOUT)
         return resp.read()
 
 
-def http_post_json(url: str, payload: dict, timeout: int = HTTP_TIMEOUT) -> tuple[int, str]:
+def http_post_json(url: str, payload: dict, headers: dict | None = None,
+                   timeout: int = HTTP_TIMEOUT) -> tuple[int, str]:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json; charset=utf-8"}, method="POST"
+        url, data=body,
+        headers={"Content-Type": "application/json; charset=utf-8", **(headers or {})},
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -382,7 +421,7 @@ def build_prompt(repo: dict, readme: str, period: dict, rank: int = 1) -> str:
         readme_block = ("README：未取到。因此本次只能依据上面的项目元信息写作，"
                         "不要编造任何安装步骤、功能清单或 API 名称；"
                         "相关小节请如实说明「未能获取 README」。")
-    return f"""请依据下面的开源项目资料，写一篇**可以直接发布的中文公众号推文**（Markdown 格式，1100~1600 字）。
+    return f"""请依据下面的开源项目资料，写一篇**可以直接发布的中文公众号推文**（Markdown 格式，1500~2000 字）。
 
 这是一篇**{noun}开源项目盘点**，主角是 {period['label']} 期间 GitHub 热度最高的项目。
 写作视角要站在"{noun} GitHub 都在关注什么"的高度，而不是单纯介绍一个仓库。
@@ -426,8 +465,9 @@ def build_prompt(repo: dict, readme: str, period: dict, rank: int = 1) -> str:
    - 编造使用体验：你没跑过就不要写"实测""亲测""用下来感觉"
    - 编造 API / 函数 / 命令行参数：README 里没有的接口名一个都不能出现
    - 编造对比结论：不要断言它比某个竞品更好，除非资料里明确写了
-8. 如果资料不足以撑起某个小节（比如 README 没写安装步骤），就直接写
-   "官方 README 未提供安装说明，建议直接看仓库"这类实话，允许小节变短。
+8. 篇幅目标是 1500~2000 字，靠**把技术点讲透**来充实，不要靠重复、排比或水词凑数。
+   如果资料确实撑不起某个小节（比如 README 没写安装步骤），就直接写
+   "官方 README 未提供安装说明，建议直接看仓库"这类实话，允许小节变短——
    宁可某个部分单薄，也不要靠想象填满。
 9. 描述项目亮点时，用"它声称 / README 里写到"这样的措辞区分"项目自己的说法"，
    不要写成你验证过的结论。
@@ -551,7 +591,7 @@ def build_payload(model: str, prompt: str, purpose: str = "推文生成",
             {"role": "system", "content": system or SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
-        "max_tokens": max_tokens or 3000,
+        "max_tokens": max_tokens or LLM_MAX_TOKENS,
         "stream": False,
         "thinking": {"type": "enabled" if on else "disabled"},
     }
@@ -565,28 +605,27 @@ def build_payload(model: str, prompt: str, purpose: str = "推文生成",
     return payload
 
 
-def call_llm(prompt: str) -> str:
-    base, api_key, override = deepseek_cfg()
-    if not api_key:
-        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
-    model = resolve_model(base, api_key, override)
+def _chat_once(base: str, api_key: str, model: str, payload: dict) -> dict:
+    """打一次 /chat/completions（含重试），返回单轮结果。
 
-    payload = build_payload(model, prompt, purpose="推文生成")
+    返回 {"content", "finish_reason", "usage", "reasoning"}。
+    """
     last_err = ""
     for attempt in range(1, LLM_RETRIES + 1):
         code, body = deepseek_request(base, api_key, "/chat/completions", payload)
         if code == 200:
             try:
                 j = json.loads(body)
-                content = (j["choices"][0]["message"].get("content") or "").strip()
+                choice = j["choices"][0]
+                content = (choice["message"].get("content") or "").strip()
                 if not content:
                     raise RuntimeError("模型返回空内容")
-                usage = j.get("usage") or {}
-                reasoning = (j["choices"][0]["message"].get("reasoning_content") or "")
-                log(f"[4/5] {model} 生成成功（{len(content)} 字符"
-                    + (f"，含思维链 {len(reasoning)} 字符" if reasoning else "")
-                    + f"，tokens in/out = {usage.get('prompt_tokens', '?')}/{usage.get('completion_tokens', '?')}）")
-                return scrub_markdown(content)
+                return {
+                    "content": content,
+                    "finish_reason": choice.get("finish_reason") or "stop",
+                    "usage": j.get("usage") or {},
+                    "reasoning": choice["message"].get("reasoning_content") or "",
+                }
             except Exception as e:  # noqa: BLE001 响应结构异常也走重试
                 last_err = f"响应解析失败：{e}"
         else:
@@ -599,6 +638,48 @@ def call_llm(prompt: str) -> str:
         if attempt < LLM_RETRIES:
             time.sleep(2 ** attempt)
     raise RuntimeError(f"DeepSeek 调用失败：{last_err}")
+
+
+def call_llm(prompt: str) -> str:
+    """生成推文正文，并对"输出被截断"做兜底。
+
+    为什么必须看 finish_reason：思考模式下思维链与正文共享 max_tokens 预算，
+    预算耗尽时模型返回的是**半截正文 + finish_reason=length**，而 HTTP 依然是 200、
+    content 也非空——不查这个字段，断章就会被当成成品一路推出去。
+    """
+    base, api_key, override = deepseek_cfg()
+    if not api_key:
+        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
+    model = resolve_model(base, api_key, override)
+
+    payload = build_payload(model, prompt, purpose="推文生成")
+    messages = list(payload["messages"])
+    parts: list[str] = []
+
+    for round_no in range(1, CONTINUE_ROUNDS + 2):  # 首轮 + 最多 CONTINUE_ROUNDS 次续写
+        payload["messages"] = messages
+        resp = _chat_once(base, api_key, model, payload)
+        parts.append(resp["content"])
+        usage = resp["usage"]
+        log(f"[4/5] {model} 生成成功（第 {round_no} 轮，{len(resp['content'])} 字符"
+            + (f"，含思维链 {len(resp['reasoning'])} 字符" if resp["reasoning"] else "")
+            + f"，tokens in/out = {usage.get('prompt_tokens', '?')}/{usage.get('completion_tokens', '?')}"
+            + f"，finish_reason={resp['finish_reason']}）")
+
+        if resp["finish_reason"] != "length":
+            break
+
+        if round_no > CONTINUE_ROUNDS:
+            log(f"      ! 已续写 {CONTINUE_ROUNDS} 次仍撞上 max_tokens={payload['max_tokens']}，"
+                f"正文可能仍不完整")
+            break
+
+        log(f"      ! finish_reason=length：输出撞上 max_tokens={payload['max_tokens']}，"
+            f"追加续写（第 {round_no}/{CONTINUE_ROUNDS} 次）")
+        messages.append({"role": "assistant", "content": resp["content"]})
+        messages.append({"role": "user", "content": CONTINUE_PROMPT})
+
+    return scrub_markdown("".join(parts))
 
 
 def extract_title(md: str, fallback: str) -> str:
@@ -650,6 +731,23 @@ def scrub_markdown(text: str) -> str:
     if not t.startswith("#"):
         log("      质检：开头不是一级标题（不自动改写，交由 prompt 约束）")
     return t
+
+
+def check_article_length(article: str) -> int:
+    """交付前的完整性兜底：正文字数明显不足时告警。
+
+    统计时先剔除 HTML 注释、代码块与空白，免得把标记和排版算成字数。
+    只报警不自动改写——补内容属于模型的活，脚本不该替它猜。
+    """
+    plain = re.sub(r"<!--.*?-->", "", article, flags=re.S)
+    plain = re.sub(r"```.*?```", "", plain, flags=re.S)
+    n = len(re.sub(r"\s", "", plain))
+    if n < ARTICLE_MIN_CHARS:
+        log(f"      质检：! 正文仅 {n} 字，远低于 prompt 要求的 1500~2000 字，"
+            f"疑似被截断，建议人工过一眼再发")
+    else:
+        log(f"      质检：正文 {n} 字，长度正常")
+    return n
 
 
 def fallback_article(repo: dict, period: dict, rank: int = 1) -> str:
@@ -713,7 +811,7 @@ def to_lark_md(md: str, limit: int = FEISHU_MD_LIMIT) -> str:
     text = re.sub(r"^\s*$", "", text, flags=re.M)               # 空行压缩
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if len(text) > limit:
-        text = text[:limit].rstrip() + f"\n\n...（正文过长已截断，完整版见仓库 articles/）"
+        text = text[:limit].rstrip() + "\n\n...（正文过长，已截断）"
     return text
 
 
@@ -750,8 +848,8 @@ def feishu_error_hint(body: str) -> str:
     return f"      → {hint}" if hint else ""
 
 
-def feishu_send(webhook: str, payload: dict, tag: str = "[5/5]") -> bool:
-    """统一出口：加签名 -> POST -> 判成功 -> 失败时给出人话提示。"""
+def feishu_send_webhook(webhook: str, payload: dict, tag: str = "[5/5]") -> bool:
+    """自定义机器人通道：加签名 -> POST -> 判成功 -> 失败时给出人话提示。"""
     secret = os.environ.get("FEISHU_SIGN_KEY", "").strip()
     if secret:
         ts = int(time.time())
@@ -770,7 +868,7 @@ def feishu_send(webhook: str, payload: dict, tag: str = "[5/5]") -> bool:
         j = {}
 
     if code == 200 and j.get("code", 0) == 0:
-        log(f"{tag} 飞书推送成功（报文 {size} 字节）")
+        log(f"{tag} 飞书推送成功（自定义机器人，报文 {size} 字节）")
         return True
 
     log(f"{tag} 飞书推送失败 HTTP={code} 报文={size} 字节 resp={resp[:200]}")
@@ -780,45 +878,328 @@ def feishu_send(webhook: str, payload: dict, tag: str = "[5/5]") -> bool:
     return False
 
 
-def push_feishu(webhook: str, title: str, md: str, repo: dict, period: dict,
-                rank: int = 1, dry_run: bool = False) -> bool:
-    body = to_lark_md(md)
-    card = {
-        "msg_type": "interactive",
-        "card": {
-            "config": {"wide_screen_mode": True, "enable_forward": True},
-            "header": {
-                "template": "blue",
-                "title": {"tag": "plain_text", "content": title[:60]},
-            },
-            "elements": [
-                {"tag": "div", "text": {"tag": "lark_md", "content": body}},
-                {"tag": "hr"},
-                {"tag": "div", "text": {"tag": "lark_md", "content":
-                    f"榜单：{period['label']} 第 {rank} 名　|　"
-                    f"[{repo['full_name']}]({repo['url']})\n"
-                    f"{period['noun']} +{repo.get('stars_period') or 0} ★　|　"
-                    f"累计 {repo.get('stars') or '—'} ★　|　生成于 {now_cst():%Y-%m-%d %H:%M}"}},
-            ],
-        },
+# ---------------------------------------------------------------- 飞书：自建应用机器人
+# 与自定义机器人的差别：应用以自身身份发消息，不需要签名校验和关键词，
+# 但要求先在开放平台建应用、开权限、把应用拉进目标群，并拿到 receive_id。
+
+FEISHU_API = "https://open.feishu.cn/open-apis"
+
+# 应用通道常见错误码 -> 该动手改哪里（码值取自飞书《发送消息》接口文档）
+FEISHU_APP_ERROR_HINTS = {
+    230025: "消息体超长。卡片消息上限 30KB、文本 150KB，调小 FEISHU_MD_LIMIT",
+    230027: "应用缺权限或没开机器人能力。开放平台 → 权限管理里加「以应用的身份发消息」"
+            "（im:message 或 im:message:send_as_bot），并在「添加应用能力」里加上机器人，"
+            "然后重新发布版本",
+    230034: "receive_id 无效。核对 FEISHU_RECEIVE_ID 与 FEISHU_RECEIVE_ID_TYPE 是否匹配"
+            "（chat_id 形如 oc_xxx，open_id 形如 ou_xxx）",
+    230035: "没有发言权限。群可能开了禁言、机器人被屏蔽，或受租户沟通权限管控",
+    232009: "目标群已解散，换一个 chat_id",
+}
+
+
+def feishu_app_cfg() -> dict | None:
+    """读取自建应用配置。三项缺一即视为未启用该通道。"""
+    app_id = env_first(FEISHU_APP_ID_ENVS)
+    app_secret = env_first(FEISHU_APP_SECRET_ENVS)
+    receive_id = os.environ.get("FEISHU_RECEIVE_ID", "").strip()
+    if not (app_id and app_secret and receive_id):
+        return None
+    return {
+        "app_id": app_id,
+        "app_secret": app_secret,
+        "receive_id": receive_id,
+        "receive_id_type": os.environ.get("FEISHU_RECEIVE_ID_TYPE", "").strip() or "chat_id",
     }
-    if dry_run:
-        raw = json.dumps(card, ensure_ascii=False)
-        log(f"[5/5] --dry-run：跳过推送。报文 {len(raw.encode('utf-8'))} 字节，预览如下")
-        log("      " + raw[:600] + (" ..." if len(raw) > 600 else ""))
+
+
+def feishu_tenant_token(app_id: str, app_secret: str) -> str:
+    """换取 tenant_access_token —— 应用身份的调用凭证，有效期约 2 小时。"""
+    code, body = http_post_json(
+        f"{FEISHU_API}/auth/v3/tenant_access_token/internal",
+        {"app_id": app_id, "app_secret": app_secret},
+    )
+    try:
+        j = json.loads(body)
+    except json.JSONDecodeError:
+        j = {}
+    if code == 200 and j.get("code", 0) == 0 and j.get("tenant_access_token"):
+        return j["tenant_access_token"]
+    hints = {
+        10003: "请求参数不对，多半是 App ID 写错了",
+        10014: "App Secret 无效（改过 Secret 就得换成新的），或应用还没发布版本",
+    }
+    hint = hints.get(j.get("code"))
+    raise RuntimeError(f"换取 tenant_access_token 失败 HTTP={code} "
+                       f"code={j.get('code')} msg={j.get('msg')}"
+                       + (f"　→ {hint}" if hint else ""))
+
+
+def feishu_app_send(cfg: dict, msg_type: str, content, tag: str = "[5/5]") -> bool:
+    """通过自建应用发消息。
+
+    注意与 webhook 的两处差异：content 必须是**序列化后的字符串**而非对象；
+    身份靠 Authorization: Bearer <tenant_access_token>，不需要签名。
+    """
+    try:
+        token = feishu_tenant_token(cfg["app_id"], cfg["app_secret"])
+    except RuntimeError as e:
+        log(f"{tag} ! {e}")
+        return False
+
+    url = (f"{FEISHU_API}/im/v1/messages"
+           f"?receive_id_type={urllib.parse.quote(cfg['receive_id_type'])}")
+    payload = {
+        "receive_id": cfg["receive_id"],
+        "msg_type": msg_type,
+        "content": json.dumps(content, ensure_ascii=False),
+    }
+    code, resp = http_post_json(url, payload, headers={"Authorization": f"Bearer {token}"})
+
+    size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    try:
+        j = json.loads(resp)
+    except json.JSONDecodeError:
+        j = {}
+
+    if code == 200 and j.get("code", 0) == 0:
+        log(f"{tag} 飞书推送成功（应用机器人，报文 {size} 字节）")
         return True
-    return feishu_send(webhook, card)
+
+    log(f"{tag} 飞书推送失败 HTTP={code} 报文={size} 字节 resp={resp[:200]}")
+    hint = FEISHU_APP_ERROR_HINTS.get(j.get("code"))
+    if hint:
+        log(f"      → {hint}")
+    return False
 
 
-def ping_feishu(webhook: str) -> bool:
+def feishu_upload_file(token: str, filename: str, content: bytes,
+                       file_type: str = "stream") -> str:
+    """上传文件素材，返回 file_key —— 发文件消息前必须先走这一步。
+
+    飞书的 file_type 只认 opus/mp4/pdf/doc/xls/stream，Markdown 归到 stream。
+    表单是 multipart/form-data，标准库没有现成封装，这里手拼 boundary。
+    """
+    boundary = "----TrendingBoundary" + uuid.uuid4().hex
+    buf = bytearray()
+
+    def field(name: str, value: str) -> None:
+        buf.extend(f"--{boundary}\r\n"
+                   f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                   f"{value}\r\n".encode("utf-8"))
+
+    field("file_type", file_type)
+    field("file_name", filename)
+    buf.extend(f"--{boundary}\r\n"
+               f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+               f"Content-Type: text/plain; charset=utf-8\r\n\r\n".encode("utf-8"))
+    buf.extend(content)
+    buf.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+
+    req = urllib.request.Request(
+        f"{FEISHU_API}/im/v1/files",
+        data=bytes(buf),
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            code, body = resp.status, resp.read().decode("utf-8", "ignore")
+    except urllib.error.HTTPError as e:
+        code, body = e.code, e.read().decode("utf-8", "ignore")
+
+    try:
+        j = json.loads(body)
+    except json.JSONDecodeError:
+        j = {}
+    if code == 200 and j.get("code", 0) == 0 and (j.get("data") or {}).get("file_key"):
+        return j["data"]["file_key"]
+
+    hints = {
+        234001: "请求参数无效，检查 file_type / file_name",
+        234006: "文件超过 30MB 上限",
+        234007: "应用没启用机器人能力。「添加应用能力」里加上机器人并重新发布版本",
+        234010: "不允许上传空文件",
+    }
+    hint = hints.get(j.get("code"))
+    raise RuntimeError(f"上传文件失败 HTTP={code} code={j.get('code')} msg={j.get('msg')}"
+                       + (f"　→ {hint}" if hint else ""))
+
+
+def feishu_app_send_file(cfg: dict, filename: str, content: bytes,
+                         tag: str = "[5/5]") -> bool:
+    """把 .md 源文件作为文件消息发给目标会话。
+
+    上传接口要求额外开通 im:resource（获取与上传图片或文件资源）权限，
+    只有 im:message 是传不上去的。
+    """
+    try:
+        token = feishu_tenant_token(cfg["app_id"], cfg["app_secret"])
+        file_key = feishu_upload_file(token, filename, content)
+    except RuntimeError as e:
+        log(f"{tag} ! {e}")
+        return False
+    log(f"{tag} 源文件已上传（{filename}，{len(content)} 字节）")
+
+    url = (f"{FEISHU_API}/im/v1/messages"
+           f"?receive_id_type={urllib.parse.quote(cfg['receive_id_type'])}")
+    payload = {
+        "receive_id": cfg["receive_id"],
+        "msg_type": "file",
+        "content": json.dumps({"file_key": file_key}, ensure_ascii=False),
+    }
+    code, resp = http_post_json(url, payload, headers={"Authorization": f"Bearer {token}"})
+
+    try:
+        j = json.loads(resp)
+    except json.JSONDecodeError:
+        j = {}
+    if code == 200 and j.get("code", 0) == 0:
+        log(f"{tag} 飞书推送成功（应用机器人 · 文件消息）")
+        return True
+
+    log(f"{tag} 飞书推送失败 HTTP={code} resp={resp[:200]}")
+    hint = FEISHU_APP_ERROR_HINTS.get(j.get("code"))
+    if hint:
+        log(f"      → {hint}")
+    return False
+
+
+def feishu_list_chats(app_id: str, app_secret: str, limit: int = 50) -> list[dict]:
+    """列出应用所在的群，用来拿 chat_id。需要 im:chat:readonly 权限。"""
+    token = feishu_tenant_token(app_id, app_secret)
+    raw = http_get(f"{FEISHU_API}/im/v1/chats?page_size={limit}",
+                   headers={"Authorization": f"Bearer {token}"})
+    j = json.loads(raw.decode("utf-8", "ignore"))
+    if j.get("code", 0) != 0:
+        raise RuntimeError(f"code={j.get('code')} msg={j.get('msg')}")
+    return (j.get("data") or {}).get("items") or []
+
+
+def feishu_channel() -> tuple[str, dict | None]:
+    """挑一条可用通道：自建应用优先，其次自定义机器人 webhook。"""
+    app = feishu_app_cfg()
+    if app:
+        return "app", app
+    webhook = os.environ.get("FEISHU_WEBHOOK_URL", "").strip()
+    if webhook:
+        return "webhook", {"url": webhook}
+    return "", None
+
+
+def feishu_send(msg_type: str, content, tag: str = "[5/5]") -> bool:
+    """发消息的唯一出口——两个通道对同一份内容的包装方式不同，在这里抹平。
+
+    content 语义：
+      interactive -> 卡片对象（不含 msg_type / card 这层包装）
+      text        -> {"text": "..."}
+    """
+    name, cfg = feishu_channel()
+    if name == "app":
+        return feishu_app_send(cfg, msg_type, content, tag)
+    if name == "webhook":
+        payload = {"msg_type": msg_type}
+        if msg_type == "interactive":
+            payload["card"] = content
+        else:
+            payload["content"] = content
+        return feishu_send_webhook(cfg["url"], payload, tag)
+
+    log(f"{tag} ! 没有可用的飞书通道：请配 FEISHU_GITHUB_ACTION_APP_ID / "
+        f"FEISHU_GITHUB_ACTION_APP_SECRET / FEISHU_RECEIVE_ID，"
+        f"或退回自定义机器人的 FEISHU_WEBHOOK_URL")
+    return False
+
+
+def build_card(title: str, body: str, footer: str) -> dict:
+    """卡片对象本体，两个通道共用。
+
+    webhook 把它塞进 payload 的 `card` 字段；应用 API 则序列化成字符串当 content。
+    """
+    return {
+        "config": {"wide_screen_mode": True, "enable_forward": True},
+        "header": {
+            "template": "blue",
+            "title": {"tag": "plain_text", "content": title[:60]},
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": footer}},
+        ],
+    }
+
+
+def push_feishu(filename: str, source_md: str, title: str, repo: dict, period: dict,
+                rank: int = 1, dry_run: bool = False) -> bool:
+    """把这一期推出去。
+
+    应用通道直接发 .md **源文件**——用户拿到原件就能排版，不会被卡片那种降级
+    markdown 卡住（标题被压成加粗、表格被拆成圆点）。webhook 发不了文件，降级成卡片。
+    """
+    name, cfg = feishu_channel()
+    raw_bytes = source_md.encode("utf-8")
+
+    # dry-run 是本地预览，不该因为没配通道就失败，所以放在通道检查之前
+    if dry_run:
+        what = {"app": f"源文件 {filename}", "webhook": "卡片消息"}.get(name, "内容（未配通道）")
+        log(f"[5/5] --dry-run：跳过推送。将要发送 {what}（{len(raw_bytes)} 字节），预览如下")
+        log("      " + source_md[:600].replace("\n", "\n      ")
+            + (" ..." if len(source_md) > 600 else ""))
+        return True
+
+    if not name:
+        log("[5/5] ! 没有可用的飞书通道：请配 FEISHU_GITHUB_ACTION_APP_ID / "
+            "FEISHU_GITHUB_ACTION_APP_SECRET / FEISHU_RECEIVE_ID")
+        return False
+
+    if name == "app":
+        return feishu_app_send_file(cfg, filename, raw_bytes)
+
+    log("      通道是自定义机器人 webhook，发不了文件，降级成卡片消息")
+    card = build_card(
+        title,
+        to_lark_md(source_md),
+        f"榜单：{period['label']} 第 {rank} 名　|　"
+        f"[{repo['full_name']}]({repo['url']})\n"
+        f"{period['noun']} +{repo.get('stars_period') or 0} ★　|　"
+        f"累计 {repo.get('stars') or '—'} ★　|　生成于 {now_cst():%Y-%m-%d %H:%M}",
+    )
+    return feishu_send_webhook(cfg["url"], {"msg_type": "interactive", "card": card})
+
+
+def ping_feishu() -> bool:
     """配置期连通性自检：只发一条最小文本，不消耗模型额度。"""
-    log("[ping] 向飞书发送连通性测试消息 ...")
-    ok = feishu_send(webhook, {
-        "msg_type": "text",
-        "content": {"text": "[Trending Weekly] webhook 连通性测试：收到这条说明 Secret 配好了"},
-    }, tag="[ping]")
+    app_id = env_first(FEISHU_APP_ID_ENVS)
+    app_secret = env_first(FEISHU_APP_SECRET_ENVS)
+
+    # 有应用凭证就先列群——chat_id 是最容易配错的一项，直接打出来省得翻文档
+    if app_id and app_secret:
+        log("[ping] 飞书通道：自建应用机器人")
+        try:
+            chats = feishu_list_chats(app_id, app_secret)
+        except Exception as e:  # noqa: BLE001 列群失败不该挡住后面的发送测试
+            log(f"[ping] ! 列出应用所在群失败（多半是缺 im:chat:readonly 权限）：{e}")
+        else:
+            if chats:
+                log(f"[ping] 应用已在 {len(chats)} 个群里，chat_id 直接抄下面这列：")
+                for c in chats[:20]:
+                    log(f"       {c.get('chat_id')}  {c.get('name') or '(未命名)'}")
+            else:
+                log("[ping] ! 应用不在任何群里：先把它拉进目标群")
+    elif app_id or app_secret:
+        log("[ping] ! App ID 与 App Secret 需要成对配置，跳过应用自检")
+
+    log("[ping] 发送连通性测试消息 ...")
+    ok = feishu_send(
+        "text",
+        {"text": "[Trending Weekly] 连通性测试：收到这条说明飞书推送配好了"},
+        tag="[ping]",
+    )
     if ok:
-        log("[ping] 群里应该已经收到测试消息，可以正式跑了")
+        log("[ping] 目标会话里应该已经收到测试消息，可以正式跑了")
     return ok
 
 
@@ -861,7 +1242,7 @@ def ping_deepseek() -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="GitHub Trending 周榜 -> DeepSeek 推文 -> 飞书")
-    ap.add_argument("--dry-run", action="store_true", help="不调 LLM、不推送，只验证抓取与落盘")
+    ap.add_argument("--dry-run", action="store_true", help="不调 LLM、不推送，只验证抓取并预览卡片")
     ap.add_argument("--no-push", action="store_true", help="生成但不推送飞书")
     ap.add_argument("--top", type=int, default=0,
                     help="强制指定取榜单第几名（1 起）。不传则让模型从候选里挑选，默认自动")
@@ -870,18 +1251,15 @@ def main() -> int:
     ap.add_argument("--since", default="weekly", choices=["daily", "weekly", "monthly"],
                     help="榜单周期，默认 weekly（GitHub 近一周热度榜）")
     ap.add_argument("--ping", action="store_true",
-                    help="自检：验飞书 webhook + DeepSeek 模型/Key 连通性，不抓榜单")
+                    help="自检：验飞书通道 + DeepSeek 模型/Key 连通性，不抓榜单")
     args = ap.parse_args()
 
     today = now_cst()
 
     # 配置期自检：配完 Secret 先 ping 一下，比跑一遍全流程省事得多
     if args.ping:
-        log("=== 自检模式（不抓榜单、不写文件、不推送正文）===")
-        webhook = os.environ.get("FEISHU_WEBHOOK_URL", "").strip()
-        if not webhook:
-            log("[ping] ! 未配置 FEISHU_WEBHOOK_URL，跳过飞书自检")
-        feishu_ok = ping_feishu(webhook) if webhook else True
+        log("=== 自检模式（不抓榜单、不调模型、只验通道）===")
+        feishu_ok = ping_feishu()
         ds_ok = ping_deepseek()
         log(f"=== 自检结果：飞书 {'OK' if feishu_ok else 'FAIL'}　"
             f"DeepSeek {'OK' if ds_ok else 'FAIL'} ===")
@@ -918,6 +1296,7 @@ def main() -> int:
     readme = fetch_readme(repo["full_name"])
 
     # 4. 生成正文
+    used_fallback = args.dry_run
     if args.dry_run:
         log("[4/5] --dry-run：跳过模型调用，使用兜底模板")
         article = fallback_article(repo, period, rank)
@@ -927,14 +1306,19 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 模型挂了不能中断流水线
             log(f"[4/5] ! 生成失败：{e}；降级为模板推文")
             article = fallback_article(repo, period, rank)
+            used_fallback = True
 
-    # 交付前统一质检：保证落盘的是干净的原生 Markdown（标题必须是全文第一个元素）
+    # 交付前统一质检：保证标题是全文第一个元素
     article = scrub_markdown(article)
     title = extract_title(article, repo["full_name"])
+    if used_fallback:
+        # 兜底模板本来就短，对它有字数要求只会天天误报
+        log("      质检：走的是兜底模板，跳过正文字数检查")
+    else:
+        check_article_length(article)
 
-    # 头部元信息以 HTML 注释形式放在最前——这是**合法的原生 Markdown**，
-    # 任何 Markdown 编辑器/渲染器都会忽略它，公众号编辑器粘贴时也不会带进去；
-    # 但 git 历史里留下了"哪个模型、哪个榜单、哪个项目、怎么选出来的"完整出处。
+    # 出处/选题依据原本写在文件的头部注释里，不再落盘后改为打进日志——
+    # 在 Actions 的运行日志里照样能查到"哪一期、哪个模型、怎么选出来的"。
     pick_desc = {
         "model": f"模型从 {len(cands)} 个候选里选中（评分 {choice.get('score')}）",
         "forced": "人工指定 --top",
@@ -942,28 +1326,34 @@ def main() -> int:
         "fallback-top": "选题失败，降级取榜首",
         "dry-run": "dry-run 未选题，取榜首",
     }.get(choice["method"], choice["method"])
-    doc = (f"<!-- generated by Trending/trending_article.py at {today:%Y-%m-%d %H:%M:%S} +08:00 -->\n"
-           f"<!-- trending: {args.since} | period {period['label']} | rank #{rank} | "
-           f"{period['noun']} +{repo.get('stars_period') or 0} stars -->\n"
-           f"<!-- model: {model_used} | thinking: {'on' if thinking_enabled() else 'off'} -->\n"
-           f"<!-- selected: {pick_desc}"
-           + (f" | {choice['reason']}" if choice.get("reason") else "") + " -->\n"
-           f"<!-- source: {repo['url']} -->\n\n"
-           f"{article}\n")
+    log(f"      出处：model={model_used}　thinking={'on' if thinking_enabled() else 'off'}　"
+        f"period={period['label']}　rank=#{rank}　选题={pick_desc}")
+    log(f"      source={repo['url']}")
 
-    OUT_DIR.mkdir(exist_ok=True)
-    out_file = OUT_DIR / f"{period['slug']}.md"
-    out_file.write_text(doc, encoding="utf-8")
-    LATEST.write_text(doc, encoding="utf-8")
-    log(f"      已写入 {out_file.relative_to(ROOT)} 与 {LATEST.name}"
-        f"（正文 {len(article)} 字符，原生 Markdown）")
+    # 组装最终要发出去的 .md 源文件。头部几行是 HTML 注释——合法的 Markdown，
+    # 任何渲染器都会忽略、粘到公众号编辑器也不会带进去，但文件里留下了
+    # "哪一期、哪个模型、怎么选出来的"完整出处。
+    source_md = (
+        f"<!-- generated by Trending/trending_article.py at {today:%Y-%m-%d %H:%M:%S} +08:00 -->\n"
+        f"<!-- trending: {args.since} | period {period['label']} | rank #{rank} | "
+        f"{period['noun']} +{repo.get('stars_period') or 0} stars -->\n"
+        f"<!-- model: {model_used} | thinking: {'on' if thinking_enabled() else 'off'} -->\n"
+        f"<!-- selected: {pick_desc} -->\n"
+        f"<!-- source: {repo['url']} -->\n\n"
+        f"{article}\n"
+    )
+    filename = f"{period['slug']}_{repo['full_name'].split('/')[-1]}.md"
+    log(f"      源文件：{filename}（{len(source_md.encode('utf-8'))} 字节）")
 
     # 5. 推送
-    webhook = os.environ.get("FEISHU_WEBHOOK_URL", "").strip()
-    if args.no_push or not webhook:
-        log("[5/5] 未配置 FEISHU_WEBHOOK_URL 或指定 --no-push，跳过推送")
+    if args.no_push:
+        log("[5/5] 指定 --no-push，跳过推送")
         return 0
-    push_feishu(webhook, title, article, repo, period, rank, dry_run=args.dry_run)
+    ok = push_feishu(filename, source_md, title, repo, period, rank, dry_run=args.dry_run)
+    if not ok and not args.dry_run:
+        # 不落盘后飞书是唯一出口，推失败就等于这一期白跑，必须让 Actions 标红
+        log("[5/5] ! 推送失败，且本流程不再落盘任何副本，这一期等于没产出")
+        return 1
     return 0
 
 

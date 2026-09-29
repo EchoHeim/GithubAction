@@ -68,10 +68,12 @@
 
 **每周六早 6 点（北京时间）** 自动跑一次：抓 GitHub 近一周热度最高的项目 →
 DeepSeek 从候选池里**自主选题**（不无脑取榜首，按"大众可用 / 技术新颖 / 工具属性 / 能落地"
-打分）→ 拉 README 消化成可发布的推广性公众号推文 → 落盘 `articles/YYYY-Www.md`
-（**原生 Markdown**）+ `latest.md` → 推送飞书群机器人。
+打分）→ 拉 README 消化成 1500~2000 字的公众号推文 → 以 **.md 源文件**发到飞书。
 
 模型固定 `deepseek-flash`（= DeepSeek-V4.1-Flash），**开启思考模式**。
+飞书通道优先走**自建应用机器人**（直接发 `.md` 源文件，拿到就能排版），三项凭证没配齐
+才回退到自定义机器人 webhook（发不了文件，只能发卡片）。**不落盘到仓库**，飞书是唯一出口——
+推送失败脚本会以退出码 1 结束，让 Actions 标红，避免"跑了但什么都没产出"被静默吞掉。
 
 工作流：[`.github/workflows/trending_article.yml`](./.github/workflows/trending_article.yml)
 （`cron: "0 22 * * 5"` = 周五 22:00 UTC = 周六 06:00 北京）
