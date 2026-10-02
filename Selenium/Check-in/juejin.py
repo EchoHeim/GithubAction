@@ -55,8 +55,43 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
 ⚠️ 别扫整页文案找「恭喜/抽中」—— 页面右侧「围观大奖」栏一直在播报**别人**的中奖，
 扫整页必然误报（第 1 轮就是这么把「一下没抽」报成「抽奖成功」的）。
 
-回归测试：`python -B Selenium/Check-in/juejin_regress_test.py`（合成 DOM，11 项断言）。
+回归测试：`python -B Selenium/Check-in/juejin_regress_test.py`（合成 DOM，29 项断言）。
 改选择器后务必重跑；跑之前要清代理（见 LOCAL_RUN.md）。
+
+━━━ 沸点广场：发一条沸点 + 给好友点赞（2026-10-01 新增）━━━
+签到 + 抽奖都完成后，**回首页 → 点导航栏「沸点」→ 沸点广场**：
+  1. 在顶部输入框写一句话（默认 `JUEJIN_PINS_TEXT`）→ 点「发布」；
+  2. 在沸点列表里给 **2 名好友**的沸点点「点赞」。
+**这套流程跑 `JUEJIN_PINS_ROUNDS` 遍（默认 2 遍），两遍之间隔 `JUEJIN_PINS_GAP` 秒（默认 120）**
+（lodge 要求「这两个任务执行两遍，两次之间间隔 120 秒」）。
+第 2 轮起文案自动加轮次后缀（`今天也要…~（2）`），避免与第一轮一字不差被当重复内容。
+按 lodge 给的截图实现，两条主原则与前文一致：
+  · **认页面内容、不认 URL**（`_on_pins_page()`，双向判据）；
+  · **不扫整页文案找「发布成功 / 赞」** —— 右侧「精选沸点」栏一直在播别人的内容，
+    判发布成功走「发布框是否清空」，判点赞走「卡片结构 + 文案恰为『点赞』」。
+⚠️ 只给**好友**点（卡片出现独立「关注」按钮 = 未关注，跳过）；已赞的跳过不重复点。
+筛不满 2 名好友时会切**宽松模式**补足（仍避开已赞），不让这一步白跑。
+
+━━━ 文章详情页：点赞 + 收藏 + 关注作者（2026-10-01 新增）━━━
+两遍沸点都跑完 → **回首页 → 点第 1 篇文章** → 文章详情页：
+  1. 左侧竖排操作栏点「赞」；
+  2. 点「收藏」→ 弹「选择收藏集」窗 → 选**默认收藏夹**（我的收藏）→ 点「确定」；
+  3. 右侧作者信息下方**有关注按钮就点**，已是「已关注」则忽略（绝不点成取消关注）。
+  4. 做完回首页，点**第 2 篇**，把上面这套**重复一遍**（共 `JUEJIN_ARTICLE_COUNT` 篇，默认 2）。
+⚠️ **文章是在新标签页打开的** —— 点完链接当前 driver 还停在首页句柄上，必须先
+   `switch_to` 到新句柄再去操作，做完还要关掉标签并切回首页，否则第二篇会点不动。
+   详见 `_goto_nth_article` / `_close_article_tab`。
+⚠️ 左侧那排按钮**只有图标 + 数字、没有文字文案** —— 不能靠「点赞」二字定位，
+   只能靠类名结构（`.like-btn` / `.collect-btn`）；判「已赞/已收藏」看类名有没有
+   `active/liked/collected`，有就跳过（再点一下会变取消）。
+⚠️ 「关注」二字在页头导航里也有（顶部「关注」标签），必须**限定在作者卡片内** ——
+   用「私信」按钮当锚点找同区域的「关注」。
+⚠️ **收藏点「确定」有个 Selenium 大坑**：`element.find_elements(By.XPATH, "//button")`
+   **不是**在子树里找，绝对路径 `//` 会忽略调用它的元素、退化成全文档查找，
+   于是点到了被弹窗遮住的无关「确定」，报 `element click intercepted`。
+   必须写 `.//`（见 `_scope_xpath`）；弹窗根也要取**最小**的那个浮层，不是整屏遮罩。
+
+跟抽奖一样：**沸点与文章流程的任何失败都不影响签到结论与退出码**，只记进卡片备注。
 
 用法（凭据走环境变量）：
     JUEJIN_USERNAME=手机号 JUEJIN_PASSWORD=密码 python -m Selenium.Check-in.juejin
@@ -70,6 +105,14 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
     JUEJIN_SIGNIN_URL    签到页，默认 https://juejin.cn/user/center/signin
     JUEJIN_LOTTERY_URL   幸运抽奖页，默认 https://juejin.cn/user/center/lottery
     JUEJIN_LOTTERY=0     关掉免费抽奖（只签到不抽奖）
+    JUEJIN_PINS_URL      沸点广场，默认 https://juejin.cn/pins
+    JUEJIN_PINS=0        关掉沸点流程（只签到 + 抽奖）
+    JUEJIN_PINS_TEXT     要发的沸点内容，默认「今天也要好好写代码呀~」
+    JUEJIN_PINS_LIKES    每轮要点赞的好友数，默认 2
+    JUEJIN_PINS_ROUNDS   沸点流程跑几遍，默认 2
+    JUEJIN_PINS_GAP      两遍之间的间隔秒数，默认 120
+    JUEJIN_ARTICLE=0     关掉文章详情页流程（点赞/收藏/关注）
+    JUEJIN_ARTICLE_COUNT 文章做几篇，默认 2（做完一篇回首页点下一篇）
     JUEJIN_MAX_ATTEMPTS  整轮重来的次数，默认 3
     JUEJIN_HOME_URL      首页，默认 https://juejin.cn/
 
@@ -322,6 +365,160 @@ LOTTERY_BUTTON_XPATHS = (
 )
 # 已抽完：按钮转这些文案就别再点了（再点等于白撞一次接口、还可能触发风控）
 LOTTERY_DONE_MARKERS = ("今日已抽完", "已抽完", "已用完", "明日再来", "没有免费", "次数已用完")
+
+# ── 沸点广场：发一条沸点 + 给好友沸点点赞（2026-10-01 新增）──
+#
+# 流程（按 lodge 给的截图）：
+#   签到+抽奖完成后**回首页** → 点导航栏「沸点」→ 沸点广场
+#   → 在顶部输入框写一句话 → 点「发布」
+#   → 在沸点列表里给**两名好友**的沸点点「点赞」
+#
+# ⚠️ 这条流程跟签到/抽奖是**三件独立的事**，任何一步失败都**不许**影响签到结论
+#    （跟抽奖一个原则，见 growth_center 的宽口径 try）。发沸点失败就记进卡片备注。
+PINS_URL = os.getenv("JUEJIN_PINS_URL", "https://juejin.cn/pins")
+# 导航栏「沸点」入口：它在首页顶部导航里，是个链接/菜单项。
+# ⚠️ 不能只认 `@href='/pins'` —— 线上导航是构建过的 SPA，很多项压根没有 href（走 JS 路由）。
+#    所以先按 href，再按文案；文案用 `normalize-space(text())=` 精确匹配，
+#    避免命中「沸点广场」这种更长文案时点错层级（那个是列表区的标题，不是导航项）。
+PINS_NAV_XPATHS = (
+    "//a[@href='/pins']",
+    "//a[contains(@href,'/pins') and not(contains(@href,'pins/'))]",
+    "//*[normalize-space(text())='沸点' and (self::a or self::li or self::div or self::span)]",
+    "//nav//*[contains(normalize-space(text()),'沸点')]",
+)
+# 沸点广场特征文案（判「有没有真的进对页面」，跟抽奖页一个思路：**别只看 URL**）
+# ⚠️ 页面上「沸点广场」是列表区左侧的标题，而顶部还有「沸点」导航项 ——
+#    两个页面都有的话判据就没意义，所以挑**只有沸点页才有**的文案。
+PINS_PAGE_MARKERS = ("沸点广场", "发布沸点", "请选择圈子", "快和掘友一起分享新鲜事")
+# 反例文案：出现这些说明停在别的页面（首页 / 抽奖页），没进沸点广场
+PINS_WRONG_PAGE_MARKERS = ("幸运大转盘", "免费抽奖次数", "掘友分明细")
+
+# 发布框：截图里是一大块 textarea/可编辑区，placeholder 是
+# 「快和掘友一起分享新鲜事！告诉你个小秘密，发布沸点时添加圈子和话题会被更多掘友看到哦~」
+# ⚠️ 这段 placeholder 很长且**带波浪号**，直接写全会因全半角差异失配；
+#    所以只认开头那截「快和掘友一起分享新鲜事」，并补一条**不带 placeholder 的结构兜底**
+#    （沸点页可见的唯一 textarea / contenteditable）。
+PINS_EDITOR_XPATHS = (
+    "//textarea[contains(@placeholder,'快和掘友一起分享新鲜事')]",
+    "//*[contains(@placeholder,'分享新鲜事')]",
+    "//textarea[contains(@placeholder,'沸点')]",
+    "//*[@contenteditable='true' and contains(@placeholder,'沸点')]",
+    "//textarea",
+    "//*[@contenteditable='true']",
+)
+# 发布按钮：截图里是输入框右下角那个蓝底按钮，文案就是「发布」。
+# ⚠️ 必须**限定在发布框容器内**（见 _find_publish_button）：页面上还可能有
+#    「发布沸点」标题、左侧「发布」入口等同名文案，全页模糊匹配会点错。
+PINS_PUBLISH_XPATHS = (
+    "//button[normalize-space(text())='发布']",
+    "//button[contains(normalize-space(text()),'发布')]",
+    "//*[normalize-space(text())='发布' and (self::button or self::div or self::span)]",
+)
+# 发完之后输入框里若还留着这些字，说明没发出去（或只是被打回）
+PINS_PUBLISHED_MARKERS = ("发布成功", "发表成功", "发布中")
+# 发布框里**不该残留**的内容 —— 发成功后框会清空；用它做次要判据
+PINS_DRAFT_EMPTY_RE = r"^\s*$"
+
+# 点赞：截图里每张沸点卡片底部有「分享 / 评论 / 点赞」三个按钮。
+# ⚠️ 跟抽奖按钮那次一样的坑：**别用「点赞」二字扫整页** ——
+#    右侧「精选沸点」栏、以及卡片里的「31赞」计数都可能含「赞」字。
+#    所以：先在**沸点卡片容器**内拿 `.pins-btn` 之类的结构按钮，
+#    再把文案恰好是「点赞」（未点过）的挑出来。
+PINS_LIKE_MARKERS = ("点赞", "赞")
+# 已经点过赞的文案（掘金点完会变「已赞」或加数字），见到就跳过，别重复点
+PINS_LIKED_MARKERS = ("已赞", "取消赞")
+# 关注关系判据（只给好友点赞）：卡片上出现这些说明这人**还没关注**，不算好友
+PINS_NOT_FRIEND_MARKERS = ("关注", "已关注")
+PINS_FRIEND_MARKERS = ("已关注",)  # 已关注 = 好友
+# 点赞目标数量：lodge 要「两名好友」
+PINS_LIKE_TARGET = int(os.getenv("JUEJIN_PINS_LIKES", "2"))
+# 沸点文案（lodge 说「随便写一句话」；给个默认值，也允许环境变量覆盖）
+PINS_TEXT = os.getenv("JUEJIN_PINS_TEXT", "今天也要好好写代码呀~")
+# 沸点流程要跑几遍（lodge 要求「执行两遍」）+ 两遍之间的间隔秒数
+PINS_ROUNDS = max(1, int(os.getenv("JUEJIN_PINS_ROUNDS", "2")))
+PINS_ROUND_GAP = int(os.getenv("JUEJIN_PINS_GAP", "120"))
+# 整条沸点流程的总开关
+PINS_ENABLED = os.getenv("JUEJIN_PINS", "1") != "0"
+
+# ── 文章详情页：点赞 + 收藏 + 关注作者（2026-10-01 新增）──
+#
+# 流程（按 lodge 给的截图）：
+#   两遍沸点都跑完 → **回首页** → 点第 1 篇文章 → 文章详情页
+#   → 左侧竖排操作栏点「赞」→ 点「收藏」→ 弹窗里选**默认收藏夹** → 点「确定」
+#   → 右侧作者信息下方**有关注按钮就点**，已是「已关注」则忽略
+#   → 回首页，点**第 2 篇**，把上面这套**重复一遍**（lodge 2026-10-01 追加）。
+#
+# ⚠️ 文章是**在新标签页打开的**（target=_blank / Ctrl+点击的等价行为）。
+#    所以点完链接后**当前窗口还停在首页**，必须先 switch 到新句柄再去操作详情页；
+#    做完还要切回来并关掉文章标签，否则句柄越积越多，第二篇就点不动了。
+HOME_FIRST_ARTICLE_XPATHS = (
+    # 首页信息流文章卡：掘金是 <a class="title" href="/post/xxx"> 这类结构。
+    # 支持「按序号取第 N 篇」——把 %d 换成 1/2/3…（见 _article_xpaths）。
+    "(//a[contains(@href,'/post/')])[%d]",
+    "(//a[contains(@class,'title') and contains(@href,'/post/')])[%d]",
+    "//main//a[contains(@href,'/post/')][%d]",
+    "//div[contains(@class,'entry') or contains(@class,'article')]//a[contains(@href,'/post/')][%d]",
+)
+ARTICLE_URL_HINTS = ("/post/", "/entry/")
+# 文章流程点几篇（lodge 要求「再点另一篇、重复一次」→ 默认 2）
+ARTICLE_COUNT = max(1, int(os.getenv("JUEJIN_ARTICLE_COUNT", "2")))
+
+# 文章详情页左侧竖排操作栏（截图：点赞 / 评论 / 收藏 / 分享 …）。
+# ⚠️ 这排按钮**只有图标 + 数字**，没有「点赞」二字 —— 所以不能靠文案定位，
+#    得按结构锚定：详情页主体左侧那条窄竖栏。这里用**多种结构判据**兜。
+#    点完后计数 +1、且按钮会加高亮态，用它复核是否真的点上了。
+ARTICLE_LIKE_XPATHS = (
+    # 优先：**类名里带 like 的叶子/组件**（掘金详情页操作栏是 .like-btn 这类）
+    "//*[contains(@class,'like-btn') or contains(@class,'like-icon')]",
+    "//*[contains(@class,'like')][not(.//*[contains(@class,'like')])]",
+    "//div[contains(@class,'action') or contains(@class,'operate')]"
+    "//*[contains(@class,'like') and not(.//*[contains(@class,'like')])]",
+)
+ARTICLE_COLLECT_XPATHS = (
+    "//*[contains(@class,'collect-btn') or contains(@class,'collect-icon')]",
+    "//*[contains(@class,'collect')][not(.//*[contains(@class,'collect')])]",
+    "//div[contains(@class,'action') or contains(@class,'operate')]"
+    "//*[contains(@class,'collect') and not(.//*[contains(@class,'collect')])]",
+)
+# 已点赞 / 已收藏态（点过就跳过，别点成取消）
+ARTICLE_LIKED_MARKERS = ("已点赞", "liked", "active")
+ARTICLE_COLLECTED_MARKERS = ("已收藏", "collected", "active")
+
+# 收藏弹窗：标题「选择收藏集」，副标题「选择或创建你想添加的收藏集」，
+# 列表里默认收藏夹就是「我的收藏」+「默认」标签，右下角「确定」按钮。
+COLLECT_MODAL_MARKERS = ("选择收藏集", "选择或创建你想添加的收藏集", "新建收藏集")
+COLLECT_DEFAULT_XPATHS = (
+    # 默认收藏夹：文案含「我的收藏」的那一项（截图里就是它，带「默认」小标签）
+    "//*[contains(normalize-space(.),'我的收藏')][not(.//*[contains(normalize-space(.),'我的收藏')])]",
+    "//*[contains(@class,'item') or contains(@class,'folder')][contains(normalize-space(.),'我的收藏')]",
+    "//*[contains(normalize-space(.),'默认')][not(.//*[contains(normalize-space(.),'默认')])]",
+)
+COLLECT_CONFIRM_XPATHS = (
+    "//button[normalize-space(text())='确定']",
+    "//*[normalize-space(text())='确定' and (self::button or self::div or self::span)]",
+    "//*[contains(@class,'confirm') or contains(@class,'ok')][normalize-space(text())='确定']",
+)
+# 已收藏过：弹窗不出现，或页面直接提示已收藏
+COLLECT_ALREADY_MARKERS = ("已收藏", "已加入收藏集")
+
+# 右侧作者信息区下方的关注按钮（截图：蓝色实心「关注」；已关注则是「已关注」）
+AUTHOR_FOLLOW_XPATHS = (
+    # ⚠️ 「关注」二字在页头导航里也有（顶部「关注」标签页），必须限定在**作者卡片**内。
+    #    作者卡在右侧栏，含粉丝数、文章数这类信息，用「私信」按钮当锚点最稳：
+    #    截图里关注与私信并排，所以找私信的同级/祖先范围内的「关注」。
+    "//*[normalize-space(text())='私信']/ancestor::*[self::div or self::section][1]"
+    "//*[normalize-space(text())='关注']",
+    "//*[normalize-space(text())='私信']/preceding-sibling::*[normalize-space(text())='关注']",
+    "//*[normalize-space(text())='私信']/following-sibling::*[normalize-space(text())='关注']",
+)
+AUTHOR_FOLLOWED_MARKERS = ("已关注", "互相关注")
+# 整条文章流程的总开关
+ARTICLE_ENABLED = os.getenv("JUEJIN_ARTICLE", "1") != "0"
+# 沸点卡片容器：用于**限定范围**找按钮，不要把右侧精选沸点、页头导航算进来
+PINS_ITEM_XPATH = (
+    "//div[contains(@class,'pin') or contains(@class,'item') or contains(@class,'entry')]"
+    "[.//*[contains(normalize-space(.),'点赞')]]"
+)
 
 # ⚠️ 历史教训（判据已删，教训留着）：2026-09-29 第一版拿「恭喜/抽中/获得」扫**整页文案**
 #    判抽奖成功，而抽奖页右侧「围观大奖」栏一直在播报**别人**的中奖
@@ -1207,7 +1404,1150 @@ def growth_center(driver, username="", password=""):
         return "", "抽奖失败（%s）" % str(err)[:60], ""
 
 
-def notify(bot_id, status, ores="", note="", lottery="", reward=""):
+def _goto_pins_plaza(driver, username="", password=""):
+    """回首页 → 点导航栏「沸点」→ 沸点广场。返回是否到位（**以页面内容为准**）。
+
+    顺序（按 lodge 给的截图，跟抽奖一样的思路：认内容、不认 URL）：
+      1. 回首页（导航栏只在首页/公共页上有）；
+      2. 找导航栏「沸点」并点击；
+      3. 点不到 / 没跳 → 直接 `GET /pins` 兜底（同一个登录态，等价）；
+      4. 用 `_on_pins_page()` 复核**页面内容**，别只看 URL。
+
+    ⚠️ 为什么不直接 `driver.get(PINS_URL)` 了事：lodge 明确要求走**导航栏点击**这条路径，
+       直接开 URL 会绕开导航渲染问题，真出问题时反而看不出来。所以先点、点不动才兜底。
+    """
+    driver.get(HOME_URL)
+    time.sleep(3)
+
+    nav, nav_hit = wait_visible(driver, PINS_NAV_XPATHS, 12, "导航栏「沸点」")
+    if nav is None:
+        print("[WARN] 首页导航没找到「沸点」入口，直接打开 %s" % PINS_URL)
+        driver.get(PINS_URL)
+    else:
+        print("===> 找到导航栏「沸点」（选择器 %s），点击进入" % nav_hit)
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", nav)
+            nav.click()
+        except WebDriverException as err:
+            print("[WARN] 常规点击失败(%s)，改用 JS 点击" % str(err)[:60])
+            try:
+                driver.execute_script("arguments[0].click();", nav)
+            except WebDriverException as err2:
+                print("[WARN] JS 点击也失败: %s，改为直接打开 URL" % str(err2)[:60])
+                driver.get(PINS_URL)
+        time.sleep(3)
+        # 点了没跳转就直接开 URL（同一个登录态，等价）
+        if "/pins" not in (driver.current_url or ""):
+            print("===> 导航点击未跳转（当前 %s），直接打开 %s"
+                  % (driver.current_url, PINS_URL))
+            driver.get(PINS_URL)
+
+    time.sleep(3)
+    ok = _on_pins_page(driver)
+    if not ok:
+        dump_debug(
+            driver,
+            "pins_page_not_entered",
+            notes=[
+                "没能进入沸点广场",
+                "当前 URL: %s" % driver.current_url,
+                "页面文本首 200 字: %s" % page_text(driver)[:200],
+            ],
+            secrets=(username, password),
+        )
+    print("===> 沸点广场: %s（%s）" % ("已进入" if ok else "未能进入", driver.current_url))
+    return ok
+
+
+def _on_pins_page(driver):
+    """当前页面是不是**真的**沸点广场。双向判据（同 _on_lottery_page 的思路）。
+
+      · 正：出现沸点页特征文案（沸点广场 / 发布沸点 / 请选择圈子 / 快和掘友一起分享新鲜事）
+      · 反：**没有**抽奖页的文案（幸运大转盘 / 免费抽奖次数）——
+            否则「刚抽完奖没跳走」会被误判成已到沸点页
+    """
+    text = page_text(driver)
+    if any(marker in text for marker in PINS_WRONG_PAGE_MARKERS):
+        print("[WARN] 检测到抽奖页文案，判定不是沸点广场")
+        return False
+    hit = [m for m in PINS_PAGE_MARKERS if m in text]
+    if hit:
+        print("===> 沸点页特征命中: %s" % ", ".join(hit))
+        return True
+    return False
+
+
+def publish_pin(driver, text="", username="", password=""):
+    """在沸点广场顶部输入框写一句话并点「发布」。
+
+    返回 (状态文案, 实际发出的内容)。**不抛异常** —— 见模块头：沸点流程失败绝不能
+    影响签到结论，调用方那里还有一层宽口径 try 兜着。
+    """
+    content = (text or PINS_TEXT).strip()
+    if not content:
+        return "发沸点失败（内容为空）", ""
+
+    editor, editor_hit = wait_visible(driver, PINS_EDITOR_XPATHS, 15, "沸点输入框")
+    if editor is None:
+        dump_debug(
+            driver,
+            "pins_no_editor",
+            notes=["沸点页未找到发布输入框（页面结构可能变了）"],
+            secrets=(username, password),
+        )
+        return "发沸点失败（未找到输入框）", ""
+
+    print("===> 找到沸点输入框（选择器 %s）" % editor_hit)
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", editor)
+
+        # ⚠️ 发布框可能是 textarea，也可能是 contenteditable div。
+        #    textarea 走 send_keys；contenteditable 直接 send_keys 在部分浏览器上
+        #    会把字符喂丢，所以走 execCommand('insertText')。
+        tag = (editor.tag_name or "").lower()
+        editable = (editor.get_attribute("contenteditable") or "").lower() == "true"
+        if tag == "textarea":
+            editor.clear()
+            editor.send_keys(content)
+        elif editable:
+            driver.execute_script("arguments[0].focus();", editor)
+            driver.execute_script(
+                "arguments[0].innerHTML = '';"
+                "document.execCommand('insertText', false, arguments[1]);",
+                editor, content,
+            )
+        else:
+            # 兜底：结构像输入框但不是上面两种，清空后直接塞 value
+            driver.execute_script(
+                "arguments[0].value = arguments[1];"
+                "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));",
+                editor, content,
+            )
+    except WebDriverException as err:
+        print("[WARN] 输入沸点内容失败: %s" % str(err)[:80])
+        return "发沸点失败（输入异常）", ""
+
+    time.sleep(1.5)
+    # 复核：内容有没有真的进框（进不去就别去点发布，免得发个空沸点）
+    filled = _editor_value(driver, editor)
+    if content.strip() and content.strip() not in (filled or ""):
+        print("[WARN] 输入框回读为 %r，与预期不符，仍尝试发布" % (filled or "")[:40])
+
+    button = _find_publish_button(driver, editor)
+    if button is None:
+        dump_debug(
+            driver,
+            "pins_no_publish_btn",
+            notes=["沸点页未找到「发布」按钮（页面结构可能变了）"],
+            secrets=(username, password),
+        )
+        return "发沸点失败（未找到发布按钮）", ""
+
+    print("===> 找到发布按钮: %r" % _element_text(driver, button))
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+    time.sleep(0.5)
+    clicked = False
+    try:
+        button.click()
+        clicked = True
+    except WebDriverException as err:
+        print("[WARN] 常规点击失败(%s)，改用 JS 点击" % str(err)[:60])
+        try:
+            driver.execute_script("arguments[0].click();", button)
+            clicked = True
+        except WebDriverException as err2:
+            print("[WARN] JS 点击也失败: %s" % str(err2)[:60])
+    if not clicked:
+        return "发沸点失败（按钮点击失败）", ""
+
+    print("===> 已点击「发布」，内容: %s" % content[:40])
+
+    # ⚠️ 判成功**不扫整页文案找「发布成功」**（跟抽奖那条教训同源：旁边一直在播别人的内容）。
+    #    这里只用一个**结构性**判据：发布框是否已清空。清空 = 提交走了。
+    #    清不空也不武断报失败（可能站点保留草稿），返回「已提交」让人看日志核对。
+    deadline = time.time() + 12
+    while time.time() < deadline:
+        leftover = (_editor_value(driver, editor) or "").strip()
+        if not re.match(PINS_DRAFT_EMPTY_RE, leftover):
+            time.sleep(1.5)
+            continue
+        print("===> 发布框已清空，判定沸点已发出")
+        return "已发布沸点", content
+    print("===> 发布框未清空（可能保留了草稿），按「已提交」处理")
+    return "已提交沸点（发布框未清空，请核对）", content
+
+
+def _editor_value(driver, editor):
+    """读发布框当前内容（textarea 读 value，contenteditable 读 textContent）。"""
+    try:
+        return driver.execute_script(
+            "var el = arguments[0];"
+            "if (el.tagName && el.tagName.toLowerCase() === 'textarea') return el.value || '';"
+            "return el.textContent || '';",
+            editor,
+        )
+    except WebDriverException:
+        return ""
+
+
+def _find_publish_button(driver, editor):
+    """找发布按钮。**必须限定在发布框附近**，不能全页模糊匹配。
+
+    ⚠️ 页面上「发布沸点」标题、左侧「发布」入口都含「发布」二字，
+       全页 `//*[contains(text(),'发布')]` 必然点错（跟抽奖按钮那次的坑一模一样）。
+       做法：从 editor 往上爬几层，在**所在容器内**找文案恰为「发布」的按钮；
+       容器内找不到，才退到「页面上第一个 button 且文案恰为发布」。
+    """
+    js = """
+    var editor = arguments[0];
+    var p = editor;
+    for (var hop = 0; hop < 6 && p; hop++, p = p.parentElement) {
+      var btns = p.querySelectorAll('button, div, span, a');
+      for (var i = 0; i < btns.length; i++) {
+        var b = btns[i];
+        if (b.children.length && b.tagName.toLowerCase() !== 'button') continue;
+        var t = (b.textContent || '').trim();
+        if (t === '发布' || t === '发布沸点' || t === '立即发布') return b;
+      }
+    }
+    return null;
+    """
+    try:
+        element = driver.execute_script(js, editor)
+        if element is not None and element.is_displayed():
+            return element
+    except WebDriverException as err:
+        print("[WARN] 容器内找发布按钮失败: %s" % str(err)[:60])
+
+    # 兜底：全局找文案恰为「发布」的按钮（要求是 button 标签或较短的叶子元素）
+    for xpath in PINS_PUBLISH_XPATHS:
+        try:
+            for element in driver.find_elements(By.XPATH, xpath):
+                if not element.is_displayed():
+                    continue
+                text = _element_text(driver, element)
+                if text not in ("发布", "发布沸点", "立即发布"):
+                    continue
+                print("[INFO] 发布按钮由全局兜底选择器命中: %s" % xpath)
+                return element
+        except WebDriverException:
+            continue
+    return None
+
+
+def like_friend_pins(driver, target=None, username="", password=""):
+    """给 **好友**（已关注的人）的沸点点赞，最多点 target 个。
+
+    返回 (状态文案, 实际点赞的列表)。**不抛异常**。
+
+    ⚠️ 三条铁律（都是前面踩过的坑换了个场景）：
+      1. **只给好友点**：lodge 明确说「两名好友」。卡片上若出现「关注」（未关注态），
+         说明这人不是好友，跳过 —— 别见谁都点。
+      2. **别重复点**：文案出现「已赞 / 取消赞」说明点过了，跳过。
+      3. **别扫整页找「赞」**：右侧「精选沸点」、卡片计数「31赞」都含赞字。
+         所以先按**卡片结构**框出候选，再在卡片内找文案恰为「点赞」的按钮。
+    """
+    want = PINS_LIKE_TARGET if target is None else int(target)
+    if want <= 0:
+        return "点赞已关闭（目标 0）", []
+
+    items = _find_pin_items(driver)
+    if not items:
+        # 没找到结构化卡片 → 换一条更直接的路：直接在页面上找「点赞」按钮，
+        # 但必须同时满足「不是已赞」「不是精选栏」两个条件。
+        print("[WARN] 未按卡片结构框出沸点，改用「文案恰为点赞的按钮」直接筛")
+        return _like_by_flat_buttons(driver, want)
+
+    liked = []
+    considered = 0
+    for item in items:
+        if len(liked) >= want:
+            break
+        considered += 1
+        try:
+            info = _pin_item_info(driver, item)
+        except WebDriverException:
+            continue
+        label = info["text"][:30].replace("\n", " ") or "(无文本)"
+        if info["liked"]:
+            print("===> 第 %d 张沸点已点过赞，跳过" % considered)
+            continue
+        if info["not_friend"]:
+            print("===> 第 %d 张沸点作者非好友（看到「关注」），跳过：%s" % (considered, label))
+            continue
+        if info["button"] is None:
+            print("===> 第 %d 张沸点没找到可用点赞按钮，跳过：%s" % (considered, label))
+            continue
+        print("===> 给第 %d 张沸点点赞：%s" % (considered, label))
+        if _click_like(driver, info["button"]):
+            liked.append(label)
+        time.sleep(1.5)
+
+    if len(liked) >= want:
+        return "已点赞 %d 名好友" % len(liked), liked
+    # 好友不够时，退回「普通沸点也点」的宽松模式 —— lodge 的原意是「点两个赞」，
+    # 别因为筛不出好友就把这一步判成失败（但日志里说清楚是宽松模式点的）。
+    if liked:
+        print("[INFO] 只筛到 %d 名好友（目标 %d），继续用宽松模式补足" % (len(liked), want))
+    else:
+        print("[INFO] 一个好友都没筛到，切宽松模式（不看关注关系，只避开已赞）")
+    flat, extra = _like_by_flat_buttons(driver, want - len(liked))
+    liked.extend(extra)
+    mode = "已点赞 %d 名好友" % len(liked) if len(liked) >= want else "已点赞 %d 条沸点" % len(liked)
+    return (mode, liked) if liked else ("点赞失败（没找到可点的沸点）", [])
+
+
+def _find_pin_items(driver):
+    """框出沸点列表里的卡片（要能排除右侧「精选沸点」栏）。返回元素列表。
+
+    判据：容器文本里含「点赞」二字，且**不含**右侧栏特征（「围观大奖」那种在此不适用，
+    改用「精选沸点」这个词当反例）—— 精选栏里的小卡片也可能有赞，但排版更窄。
+    这里用**宽度**当辅助判据：正文卡片明显比右侧栏宽。
+    """
+    js = """
+    var out = [];
+    // 首选：找点赞按钮，再回溯到它所在的那张卡片
+    var btns = document.querySelectorAll('button, div, span, a');
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      var t = (b.textContent || '').trim();
+      if (t !== '点赞' && t !== '已赞' && t !== '取消赞') continue;
+      // 往上爬找到「像一张卡片」的祖先：足够宽、且含作者/时间这类内容
+      var p = b, best = null;
+      for (var hop = 0; hop < 6 && p; hop++, p = p.parentElement) {
+        var r = p.getBoundingClientRect();
+        if (r.width > 400 && r.height > 60) { best = p; break; }
+      }
+      if (best && best.textContent.indexOf('精选沸点') < 0) out.push(best);
+    }
+    // 去重（同一卡片可能命中多个按钮）
+    var uniq = [];
+    for (var j = 0; j < out.length; j++) {
+      if (uniq.indexOf(out[j]) < 0) uniq.push(out[j]);
+    }
+    return uniq;
+    """
+    try:
+        return driver.execute_script(js) or []
+    except WebDriverException as err:
+        print("[WARN] 框选沸点卡片失败: %s" % str(err)[:80])
+        return []
+
+
+def _pin_item_info(driver, item):
+    """读一张沸点卡片的关键信息：文本、点赞按钮、是否已赞、作者是否非好友。"""
+    js = """
+    var item = arguments[0];
+    var text = item.textContent || '';
+    // 卡片内的点赞按钮：文案恰为「点赞」优先，其次「已赞/取消赞」
+    var btn = null, liked = false, btnText = '';
+    var cands = item.querySelectorAll('button, div, span, a');
+    for (var i = 0; i < cands.length; i++) {
+      var c = cands[i];
+      if (c.children.length && c.tagName.toLowerCase() !== 'button') continue;
+      var t = (c.textContent || '').trim();
+      if (t === '点赞' && !btn) { btn = c; btnText = t; }
+      if (t === '已赞' || t === '取消赞') { liked = true; btnText = t; if (!btn) btn = c; }
+    }
+    // 作者非好友信号：卡片里出现独立的「关注」按钮（「已关注」不算）
+    var notFriend = false;
+    for (var j = 0; j < cands.length; j++) {
+      var d = cands[j];
+      if (d.children.length && d.tagName.toLowerCase() !== 'button') continue;
+      var dt = (d.textContent || '').trim();
+      if (dt === '关注' || dt === '+关注') { notFriend = true; break; }
+    }
+    return {text: text, liked: liked, not_friend: notFriend, btn_text: btnText, button: btn};
+    """
+    try:
+        raw = driver.execute_script(js, item) or {}
+    except WebDriverException:
+        raw = {}
+    return {
+        "text": (raw.get("text") or "").strip(),
+        "liked": bool(raw.get("liked")),
+        "not_friend": bool(raw.get("not_friend")),
+        "button": raw.get("button"),
+    }
+
+
+def _like_by_flat_buttons(driver, want):
+    """宽松模式：直接在页面上找文案恰为「点赞」的按钮，点 want 个。
+
+    仍守住两条：① 文案**恰为**「点赞」（不是「31赞」「已赞」）；② 避开右侧「精选沸点」栏
+    （用祖先文本里有没有「精选沸点」判）。
+    """
+    if want <= 0:
+        return [], []
+    js = """
+    var out = [];
+    var cands = document.querySelectorAll('button, div, span, a');
+    for (var i = 0; i < cands.length; i++) {
+      var c = cands[i];
+      if (c.children.length && c.tagName.toLowerCase() !== 'button') continue;
+      var t = (c.textContent || '').trim();
+      if (t !== '点赞') continue;
+      // 往上爬 6 层，若祖先文本里出现「精选沸点」，说明在右侧栏，剔除
+      var p = c, inSide = false;
+      for (var hop = 0; hop < 6 && p; hop++, p = p.parentElement) {
+        if ((p.textContent || '').indexOf('精选沸点') >= 0) { inSide = true; break; }
+      }
+      if (inSide) continue;
+      out.push(c);
+    }
+    return out;
+    """
+    try:
+        buttons = driver.execute_script(js) or []
+    except WebDriverException:
+        return [], []
+    liked = []
+    for button in buttons:
+        if len(liked) >= want:
+            break
+        try:
+            label = _pin_item_info(driver, button).get("text", "")[:30] or "(宽松模式)"
+        except WebDriverException:
+            label = "(宽松模式)"
+        if _click_like(driver, button):
+            liked.append(label)
+        time.sleep(1.2)
+    return liked, liked
+
+
+def _click_like(driver, button):
+    """点一个点赞按钮，成功返回 True（常规点击 → JS 点击，两级降级）。"""
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+        time.sleep(0.3)
+    except WebDriverException:
+        pass
+    try:
+        button.click()
+        return True
+    except WebDriverException as err:
+        print("[WARN] 点赞常规点击失败(%s)，改用 JS 点击" % str(err)[:60])
+        try:
+            driver.execute_script("arguments[0].click();", button)
+            return True
+        except WebDriverException as err2:
+            print("[WARN] 点赞 JS 点击也失败: %s" % str(err2)[:60])
+            return False
+
+
+def _round_text(base, round_no):
+    """第 N 轮的沸点文案。
+
+    ⚠️ 第二轮**不能跟第一轮一字不差**：① 看起来像刷屏；② 有些站点对
+    「短时间内完全相同的重复内容」会直接拦（甚至当垃圾内容处理）。
+    所以第 2 轮起加一个可辨识的后缀，但**不改变原意**。
+    """
+    if round_no <= 1:
+        return base
+    return "%s（%d）" % (base, round_no)
+
+
+def pins_activity(driver, username="", password=""):
+    """沸点这一整套：进沸点广场 → 发一条沸点 → 给两名好友点赞。**跑 PINS_ROUNDS 遍**。
+
+    lodge 要求「发沸点和点赞这两个任务执行两遍，两次之间间隔 120 秒」，
+    所以这里是个轮次循环；每轮文案带轮次后缀（见 `_round_text`），避免第二轮被当成
+    与第一轮完全相同的重复内容。
+
+    返回 (发沸点状态, 发出内容, 点赞状态, 点赞明细)。**任何一步失败都不抛异常**
+    —— 跟抽奖一个原则：签到已经成功了，沸点挂掉不该把当天的签到判成失败。
+    """
+    if not PINS_ENABLED:
+        print("===> JUEJIN_PINS=0，跳过沸点流程")
+        return "已关闭（JUEJIN_PINS=0）", "", "", []
+
+    pub_statuses, contents, like_statuses, all_liked = [], [], [], []
+    for round_no in range(1, PINS_ROUNDS + 1):
+        # 两轮之间先歇够间隔 —— lodge 明确要 120 秒。放在轮首而不是轮尾，
+        # 是为了让「第一轮跑完 → 等 120s → 第二轮」这个语义一眼能看出来。
+        if round_no > 1:
+            print("===> 第 %d/%d 轮：先等 %d 秒（lodge 要求的间隔）"
+                  % (round_no, PINS_ROUNDS, PINS_ROUND_GAP))
+            time.sleep(PINS_ROUND_GAP)
+
+        print("===> ===== 沸点第 %d/%d 轮开始 =====" % (round_no, PINS_ROUNDS))
+        try:
+            # 每轮都重新回首页点导航栏进沸点广场 —— 第一轮发完后页面可能已经变了，
+            # 复用同一个页面状态去点第二轮，导航栏可能已经不在视口里。
+            if not _goto_pins_plaza(driver, username, password):
+                pub_statuses.append("第 %d 轮失败（未进入沸点广场）" % round_no)
+                contents.append("")
+                like_statuses.append("")
+                continue
+
+            text = _round_text(PINS_TEXT, round_no)
+            pub_status, content = publish_pin(driver, text, username, password)
+            print("===> 第 %d 轮发沸点: %s（内容 %r）" % (round_no, pub_status, (content or "")[:40]))
+            pub_statuses.append(pub_status)
+            contents.append(content)
+
+            like_status, liked = like_friend_pins(driver, PINS_LIKE_TARGET, username, password)
+            print("===> 第 %d 轮点赞: %s %s" % (round_no, like_status, liked))
+            like_statuses.append(like_status)
+            all_liked.extend(liked)
+        except Exception as err:
+            print("[WARN] 沸点第 %d 轮异常（不影响签到结论）: %s" % (round_no, err))
+            dump_debug(driver, "pins_error_r%d" % round_no,
+                       notes=[repr(err)], secrets=(username, password))
+            pub_statuses.append("第 %d 轮失败（%s）" % (round_no, str(err)[:40]))
+            contents.append("")
+            like_statuses.append("")
+
+    return (
+        _join_rounds(pub_statuses, "已发布沸点"),
+        " / ".join(c for c in contents if c),
+        _join_rounds(like_statuses, "已点赞"),
+        all_liked,
+    )
+
+
+def _join_rounds(values, ok_marker):
+    """把多轮结果合成一条可读文案。
+
+    两轮都成功且文案相同 → 折叠成「已发布沸点 ×2」；
+    否则逐轮列出（「第 1 轮: …；第 2 轮: …」），方便一眼看出哪轮出问题。
+    """
+    values = [v for v in values if v]
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if all(v == values[0] for v in values):
+        return "%s ×%d" % (values[0], len(values))
+    return "；".join("第 %d 轮: %s" % (i + 1, v) for i, v in enumerate(values))
+
+
+def article_activity(driver, username="", password=""):
+    """文章详情页这一套：回首页 → 依次点第 1、2… 篇文章 → 每篇都点赞 + 收藏 + 关注作者。
+
+    lodge 要求（截图 + 2026-10-01 追加）：
+      · 左侧竖排操作栏点「赞」，再点「收藏」；
+      · 收藏会弹「选择收藏集」窗 → 选**默认收藏夹**（我的收藏）→ 点「确定」；
+      · 右侧作者信息下方**有关注按钮就点**，已经是「已关注」就忽略；
+      · **做完一篇回首页，点另一篇，把上面这套重复一遍**（共 ARTICLE_COUNT 篇，默认 2）。
+      · ⚠️ 文章在**新标签页**打开 —— 见 `_goto_nth_article` 的句柄处理。
+
+    返回 (点赞状态, 收藏状态, 关注状态)，多篇用「；」连起来。
+    **失败不抛异常**（同沸点/抽奖原则）。
+    """
+    if not ARTICLE_ENABLED:
+        print("===> JUEJIN_ARTICLE=0，跳过文章流程")
+        return "已关闭（JUEJIN_ARTICLE=0）", "", ""
+
+    likes, collects, follows = [], [], []
+    for idx in range(1, ARTICLE_COUNT + 1):
+        print("===> ===== 文章第 %d/%d 篇开始 =====" % (idx, ARTICLE_COUNT))
+        try:
+            # 每篇都重新回首页点链接 —— lodge 明确要求「返回首页，重复点击另一篇文章」
+            if not _goto_nth_article(driver, idx, username, password):
+                likes.append("第 %d 篇失败（未进入详情页）" % idx)
+                continue
+
+            like_status = like_article(driver, username, password)
+            collect_status = collect_article(driver, username, password)
+            follow_status = follow_author(driver, username, password)
+            print("===> 第 %d 篇: 赞=%s / 收藏=%s / 关注=%s"
+                  % (idx, like_status, collect_status, follow_status))
+            likes.append(like_status)
+            collects.append(collect_status)
+            follows.append(follow_status)
+        except Exception as err:
+            print("[WARN] 文章第 %d 篇异常（不影响签到结论）: %s" % (idx, err))
+            dump_debug(driver, "article_error_%d" % idx,
+                       notes=[repr(err)], secrets=(username, password))
+            likes.append("第 %d 篇失败（%s）" % (idx, str(err)[:40]))
+        finally:
+            _close_article_tab(driver)
+
+    return (
+        _join_rounds(likes, "已点赞文章"),
+        _join_rounds(collects, "已收藏文章"),
+        _join_rounds(follows, "已关注作者"),
+    )
+
+
+def _article_xpaths(idx):
+    """把 HOME_FIRST_ARTICLE_XPATHS 里的 `[%d]` 换成第 idx 篇（从 1 起）。"""
+    return tuple(xp % idx if "%d" in xp else xp for xp in HOME_FIRST_ARTICLE_XPATHS)
+
+
+def _goto_nth_article(driver, idx=1, username="", password=""):
+    """回首页 → 点第 idx 篇文章 → **切到新标签页** → 等进入详情页。返回是否到位。
+
+    ⚠️⚠️ **这里的核心是「文章在新标签页打开」**：
+      掘金首页文章链接带 `target=_blank`（或等价的 window.open），点了之后
+      **当前 driver 仍停在首页那个句柄**上 —— 不切句柄就去点左侧赞按钮，
+      等于在首页上瞎找，必然报「找不到按钮」。
+      正确顺序：记下点击前的句柄 → 点击 → 等出现**新句柄** → `switch_to` 过去。
+      拿不到新句柄时再退回「直接开 href」（同标签页，等价），保证流程不空转。
+    """
+    driver.get(HOME_URL)
+    time.sleep(3)
+
+    before = set(driver.window_handles)
+    link, hit = wait_visible(driver, _article_xpaths(idx), 15, "首页第 %d 篇文章" % idx)
+    if link is None:
+        dump_debug(
+            driver,
+            "home_no_article_%d" % idx,
+            notes=["首页未找到第 %d 篇文章链接（信息流结构可能变了）" % idx,
+                   "页面文本首 200 字: %s" % page_text(driver)[:200]],
+            secrets=(username, password),
+        )
+        return False
+
+    title = _element_text(driver, link)[:40]
+    href = link.get_attribute("href") or ""
+    target = (link.get_attribute("target") or "")
+    print("===> 找到第 %d 篇文章: %r（%s，target=%r，选择器 %s）"
+          % (idx, title, href, target, hit))
+
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
+    time.sleep(0.5)
+    clicked = False
+    try:
+        link.click()
+        clicked = True
+    except WebDriverException as err:
+        print("[WARN] 常规点击失败(%s)，改用 JS 点击" % str(err)[:60])
+        try:
+            driver.execute_script("arguments[0].click();", link)
+            clicked = True
+        except WebDriverException as err2:
+            print("[WARN] JS 点击也失败: %s" % str(err2)[:60])
+
+    # 等新标签页出现（最多 ~10s）。新标签页 = 句柄集合比点击前多了。
+    new_handle = None
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        now = set(driver.window_handles)
+        added = now - before
+        if added:
+            # 多开时按「最新的在路上」取最后一个（Chrome 新标签通常追加在末尾）
+            new_handle = list(added)[-1]
+            break
+        time.sleep(0.3)
+
+    if new_handle:
+        print("===> 文章在新标签页打开，切换到句柄 %s（共 %d 个标签）"
+              % (new_handle[-8:], len(driver.window_handles)))
+        driver.switch_to.window(new_handle)
+    else:
+        # 没开新标签（或没点到）→ 同标签页路径：直接开 href 兜底
+        print("===> 未检测到新标签页（clicked=%s），按同标签页处理" % clicked)
+        if not clicked and href:
+            print("===> 改为直接打开 %s" % href)
+            driver.get(href)
+
+    # 等 URL 落到文章页 —— 不能靠「页面上有几个赞按钮」判断（首页每张卡片也有）。
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        if any(h in (driver.current_url or "") for h in ARTICLE_URL_HINTS):
+            break
+        time.sleep(0.3)
+    time.sleep(3)
+
+    url = driver.current_url or ""
+    ok = any(h in url for h in ARTICLE_URL_HINTS)
+    if not ok:
+        dump_debug(driver, "article_not_entered_%d" % idx,
+                   notes=["没能进入文章详情页", "当前 URL: %s" % url,
+                          "句柄数: %d" % len(driver.window_handles)],
+                   secrets=(username, password))
+    print("===> 文章详情页(第 %d 篇): %s（%s）" % (idx, "已进入" if ok else "未能进入", url))
+    return ok
+
+
+def _close_article_tab(driver):
+    """关掉当前文章标签并切回首页标签（若无首页标签则切到剩下的任意一个）。
+
+    ⚠️ 不关的话句柄会一篇文章攒一个，第二篇开始「当前窗口」就不确定了 ——
+       这也是 lodge 说的「注意判断新标签页」必须配套处理的一半。
+    """
+    try:
+        handles = driver.window_handles
+    except WebDriverException:
+        return
+    if len(handles) <= 1:
+        return  # 只有一个标签，别关（关了就没窗口可用了）
+
+    current = driver.current_window_handle
+    try:
+        driver.close()
+        print("===> 已关闭文章标签，回到首页标签")
+    except WebDriverException as err:
+        print("[WARN] 关闭文章标签失败: %s" % str(err)[:60])
+        return
+
+    # 切回剩下的标签；优先挑一个 URL 像首页/掘金域名的
+    remaining = [h for h in driver.window_handles if h != current]
+    if not remaining:
+        return
+    pick = remaining[0]
+    for h in remaining:
+        try:
+            driver.switch_to.window(h)
+            if any(k in (driver.current_url or "") for k in ("juejin.cn", "/")) \
+                    and not any(k in (driver.current_url or "") for k in ARTICLE_URL_HINTS):
+                pick = h
+                break
+        except WebDriverException:
+            continue
+    driver.switch_to.window(pick)
+
+
+# ⚠️ 2026-10-02 线上实测：掘金详情页左栏的**点赞按钮 class 里不含 like**，
+#    所以上面那组类名 XPath 在真实站点上一条也命中不了（两篇文章都漏），
+#    而同一列的「收藏」class 带 collect，稳定命中 —— 于是拿收藏当锚点反推。
+#    这一列的顺序是固定的（lodge 截图确认）：
+#        赞 / 评论 / 收藏 / 分享 / 举报
+#    点赞 = 该列**第 1 个**按钮，也就是从收藏往前数 2 个。
+_JS_LIKE_BY_COLLECT = """
+var el = arguments[0], node = el;
+for (var up = 0; up < 6 && node; up++) {
+  var p = node.parentElement;
+  if (!p) return null;
+  var kids = Array.prototype.slice.call(p.children);
+  var idx = kids.indexOf(node);
+  if (idx >= 0 && kids.length >= 3) {
+    // 这一层必须「长得像一列按钮」：每个都在按钮尺寸区间内、宽度量级一致、竖向排开。
+    // 否则会把「某个按钮内部的 icon/count 碎片」当成一列 —— 碎片宽高参差，过不了下面这关。
+    var box = kids.map(function (c) { return c.getBoundingClientRect(); });
+    var ok = [];
+    box.forEach(function (r, i) {
+      if (r.width >= 24 && r.width <= 220 && r.height >= 24 && r.height <= 120) ok.push(i);
+    });
+    if (ok.length >= 3) {
+      var ws = ok.map(function (i) { return box[i].width; });
+      var wmin = Math.min.apply(null, ws), wmax = Math.max.apply(null, ws);
+      var seen = {}, tops = 0;
+      ok.forEach(function (i) {
+        var k = Math.round(box[i].top);
+        if (!seen[k]) { seen[k] = 1; tops++; }
+      });
+      if (wmin > 0 && wmax / wmin <= 2.2 && tops >= 3) {
+        var pos = ok.indexOf(idx);
+        if (pos < 0) pos = 0;
+        var t = pos - 2;
+        if (t < 0) t = 0;                       // 越界就退到第一个（点赞本来就是第一个）
+        var target = kids[ok[t]];
+        if (target === node || target.contains(node)) return null;   // 别把收藏自己当点赞
+        return target;
+      }
+    }
+  }
+  node = p;
+}
+return null;
+"""
+
+
+def _find_like_by_collect_anchor(driver):
+    """兜底：拿「收藏」当锚点，反推同一列的第 1 个按钮（= 赞）。
+
+    为什么不用类名：线上掘金的点赞按钮 class 不含 like，类名法必然漏。
+    返回点赞按钮元素，失败返回 None。
+    """
+    for xpath in ARTICLE_COLLECT_XPATHS:
+        try:
+            anchors = driver.find_elements(By.XPATH, xpath)
+        except WebDriverException:
+            continue
+        for anchor in anchors:
+            try:
+                if not anchor.is_displayed():
+                    continue
+                found = driver.execute_script(_JS_LIKE_BY_COLLECT, anchor)
+                if found is not None and found != anchor:
+                    print("[INFO] 点赞按钮 由「收藏」同列反推命中（该列第 1 个）")
+                    return found
+            except (StaleElementReferenceException, WebDriverException):
+                continue
+    return None
+
+
+def _count_of(text):
+    """从「👍298」这类文本里抠出计数；抠不到返回 None（那就别瞎判）。"""
+    raw = str(text or "")
+    # ⚠️「1.2k」「1.2万」这类缩略计数，点完赞前后字符串一字不差，比不出 ±1；
+    #    硬比会把「已经点上了」误判成「计数没变化」。这时直接放弃判定，别乱下结论。
+    if re.search(r"[kKwW万]", raw):
+        return None
+    match = re.search(r"\d[\d,]*", raw)
+    if not match:
+        return None
+    try:
+        return int(match.group().replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _find_article_action(driver, xpaths, label):
+    """在文章详情页左侧操作栏找一个按钮（图标 + 数字，**没有文字文案**）。
+
+    ⚠️ 这排按钮只有图标和计数，不能靠「点赞」二字定位。策略：
+      1. 按类名结构找（like / collect）；
+      2. 找到后**排除已经点过的**（类名带 active / liked / collected）；
+      3. 排除掉明显不是操作栏的（页头、评论区）。
+    找不到返回 None。
+    """
+    for xpath in xpaths:
+        try:
+            elements = driver.find_elements(By.XPATH, xpath)
+        except WebDriverException:
+            continue
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+                # 已经点过的跳过 —— 再点一下就变「取消」了
+                cls = (element.get_attribute("class") or "").lower()
+                if "active" in cls or "liked" in cls or "collected" in cls:
+                    continue
+                # 操作项是**横向一条**（图标 + 计数），高度很小。
+                # ⚠️ 别用宽度卡：容器可能被 flex 拉满整行（实测线上/回放都出现过
+                #    宽 700+ 的情况），用宽度过滤会把真按钮整条毙掉。
+                #    所以卡高度上限 + 对齐到**最内层**那个可点元素。
+                size = element.size
+                if size["height"] == 0 or size["height"] > 80:
+                    continue
+                # 取最内层：如果它内部还有同样带 like/collect 类名的子元素，往下钻
+                inner = _innermost_match(driver, element)
+                print("[INFO] %s 命中: %s（tag=%s, %dx%d）"
+                      % (label, xpath, inner.tag_name, size["width"], size["height"]))
+                return inner
+            except (StaleElementReferenceException, WebDriverException):
+                continue
+    return None
+
+
+def _innermost_match(driver, element):
+    """在元素内部找最内层、仍是「操作项」的那个节点（避免点到包裹容器）。
+
+    判据：类名与父级同族（都含 like/collect 语义）且可点击的叶子。
+    找不到就返回原元素 —— 宁可用外层，也别返回 None。
+    """
+    try:
+        inner = driver.execute_script(
+            """
+            var el = arguments[0];
+            var base = (el.className || '').toString();
+            var key = base.indexOf('like') >= 0 ? 'like'
+                    : (base.indexOf('collect') >= 0 ? 'collect' : '');
+            if (!key) return el;
+            var best = el;
+            var walk = function (node) {
+              var kids = node.children || [];
+              for (var i = 0; i < kids.length; i++) {
+                var k = kids[i];
+                var c = (k.className || '').toString();
+                if (c.indexOf(key) >= 0) { best = k; walk(k); return; }
+              }
+              // 没有同族子元素时，往「只有一个子元素」的链上钻一层
+              if (kids.length === 1) { best = kids[0]; walk(kids[0]); }
+            };
+            walk(el);
+            return best;
+            """,
+            element,
+        )
+        return inner or element
+    except WebDriverException:
+        return element
+
+
+def like_article(driver, username="", password=""):
+    """点文章左侧的「赞」。已赞过则跳过。返回状态文案。"""
+    text = page_text(driver)
+    if any(m in text for m in ("已点赞",)):
+        # 「已点赞」在详情页顶部也可能出现，所以只当弱信号，仍尝试找按钮
+        print("[INFO] 页面出现「已点赞」字样，仍尝试定位点赞按钮")
+
+    button = _find_article_action(driver, ARTICLE_LIKE_XPATHS, "点赞按钮")
+    if button is None:
+        # 线上点赞按钮 class 不含 like，类名法必然漏 —— 改用「收藏同列第 1 个」反推
+        button = _find_like_by_collect_anchor(driver)
+    if button is None:
+        print("[WARN] 文章页未找到点赞按钮（可能已赞或结构变了）")
+        return "点赞跳过（未找到按钮或已赞）"
+
+    # ⚠️ 反推出来的按钮，事先**不知道是否已赞**。掘金已赞时再点一下 = 取消赞，
+    #    所以点完必须复核计数：
+    #      +1 → 点上了；
+    #      -1 → 原来就赞过、被这一下取消了 → 立刻补点还原（宁可不动，也不能把赞取消掉）；
+    #       0 → 没生效或本来就已赞，按跳过处理。
+    before = _element_text(driver, button)
+    if not _click_element(driver, button, "点赞"):
+        return "点赞失败（按钮点击失败）"
+    time.sleep(1.5)
+    after = _element_text(driver, button)
+    print("===> 点赞计数: %r → %r" % (before, after))
+
+    n_before, n_after = _count_of(before), _count_of(after)
+    if n_before is not None and n_after is not None:
+        if n_after == n_before - 1:
+            print("[WARN] 原本已赞，这一下点成了取消 —— 立即补点还原")
+            _click_element(driver, button, "点赞(还原)")
+            time.sleep(1.2)
+            return "点赞跳过（原本已赞，已还原）"
+        if n_after == n_before:
+            return "点赞跳过（计数未变，可能已赞）"
+    return "已点赞文章"
+
+
+def collect_article(driver, username="", password=""):
+    """点文章左侧的「收藏」，弹窗里选默认收藏夹 → 点「确定」。
+
+    返回状态文案。**收藏没弹窗 = 已收藏过**（掘金对已收藏的文章点收藏不再弹窗）。
+    """
+    button = _find_article_action(driver, ARTICLE_COLLECT_XPATHS, "收藏按钮")
+    if button is None:
+        print("[WARN] 文章页未找到收藏按钮（可能已收藏或结构变了）")
+        return "收藏跳过（未找到按钮或已收藏）"
+
+    if not _click_element(driver, button, "收藏"):
+        return "收藏失败（按钮点击失败）"
+
+    # 等弹窗出现 —— 判据是**弹窗文案**，不是「页面上有确定按钮」
+    # （详情页别处也可能有「确定」，必须等那个收藏集窗真的冒出来）
+    modal = _wait_collect_modal(driver, timeout=8)
+    if modal is None:
+        # 不弹窗多半是已经收藏过了
+        text = page_text(driver)
+        if any(m in text for m in COLLECT_ALREADY_MARKERS):
+            print("===> 未弹收藏窗，页面提示已收藏，判定为重��收藏")
+            return "收藏跳过（已收藏过）"
+        dump_debug(driver, "collect_no_modal",
+                   notes=["点了收藏但没等到「选择收藏集」弹窗"],
+                   secrets=(username, password))
+        return "收藏失败（未弹出收藏集窗口）"
+
+    print("===> 收藏弹窗已出现")
+
+    # 选**默认收藏夹**（截图里是「我的收藏」+「默认」标签那一项）
+    folder = _find_in_modal(modal, driver, COLLECT_DEFAULT_XPATHS)
+    if folder is None:
+        print("[WARN] 弹窗里没定位到默认收藏夹，直接点确定（通常会存入默认夹）")
+    else:
+        print("===> 选中默认收藏夹: %r" % _element_text(driver, folder)[:30])
+        if not _click_element(driver, folder, "默认收藏夹"):
+            print("[WARN] 默认收藏夹点击失败，仍尝试点确定")
+
+    time.sleep(0.8)
+    confirm = _find_in_modal(modal, driver, COLLECT_CONFIRM_XPATHS, require_text="确定")
+    if confirm is None:
+        dump_debug(driver, "collect_no_confirm",
+                   notes=["收藏窗里没找到「确定」按钮"],
+                   secrets=(username, password))
+        return "收藏失败（弹窗里未找到确定按钮）"
+
+    if not _click_element(driver, confirm, "确定"):
+        return "收藏失败（确定按钮点击失败）"
+
+    # 复核：弹窗消失 = 提交走了（结构性判据，别扫整页文案）
+    if _wait_modal_gone(driver, modal, timeout=8):
+        print("===> 收藏弹窗已关闭，判定收藏成功")
+        return "已收藏文章"
+    print("[WARN] 收藏弹窗未关闭，仍按已提交处理")
+    return "已提交收藏（弹窗未关闭，请核对）"
+
+
+def _wait_collect_modal(driver, timeout=8):
+    """等「选择收藏集」弹窗出现，返回它的根元素；超时返回 None。
+
+    ⚠️ 判据不能只看尺寸：真实弹窗有固定宽高，但**回放/精简 DOM 里可能很矮**，
+       用 `height >= 150` 之类的阈值会把真弹窗毙掉（实测栽过一次）。
+       所以改成「文案 + 结构」双判：文案命中，且容器是**浮层形态**
+       （position 为 fixed/absolute，或类名含 modal/dialog/popup/mask），
+       两者都满足才认。这比尺寸阈值稳，也更贴近"它是不是个弹窗"的本质。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        text = page_text(driver)
+        if all(m in text for m in COLLECT_MODAL_MARKERS[:2]):
+            try:
+                modal = driver.execute_script(
+                    """
+                    var marks = arguments[0];
+                    var all = document.querySelectorAll('div, section, dialog');
+                    var best = null, bestArea = -1;
+                    for (var i = 0; i < all.length; i++) {
+                      var el = all[i];
+                      var t = el.textContent || '';
+                      var hit = true;
+                      for (var j = 0; j < marks.length; j++) {
+                        if (t.indexOf(marks[j]) < 0) { hit = false; break; }
+                      }
+                      if (!hit) continue;
+                      var r = el.getBoundingClientRect();
+                      if (r.width < 200 || r.height < 60) continue;
+                      // 浮层判据：定位脱离常规流，或类名带 modal/dialog/popup/mask
+                      var st = window.getComputedStyle(el);
+                      var cls = (el.className || '').toString().toLowerCase();
+                      var isOverlay = (st.position === 'fixed' || st.position === 'absolute')
+                        || /modal|dialog|popup|mask|overlay/.test(cls);
+                      if (!isOverlay) continue;
+                      // ⚠️ 取**最小的**满足条件的浮层 = 弹窗内容本体，不是整屏遮罩。
+                      //    选最大的那片 mask 会把整页罩进来，于是 `确定` 会在
+                      //    「弹窗里的确定」和「页面上被遮住的无关确定」之间二选一 ——
+                      //    实测就栽在这：点到了被遮挡的无关按钮，报 click intercepted。
+                      var area = r.width * r.height;
+                      if (best === null || area < bestArea) { bestArea = area; best = el; }
+                    }
+                    return best;
+                    """,
+                    list(COLLECT_MODAL_MARKERS[:2]),
+                )
+            except WebDriverException:
+                modal = None
+            if modal is not None:
+                return modal
+        time.sleep(0.3)
+    return None
+
+
+def _wait_modal_gone(driver, modal, timeout=8):
+    """等弹窗消失（元素脱离文档 或 不可见）。返回是否已消失。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if not modal.is_displayed():
+                return True
+        except StaleElementReferenceException:
+            return True
+        except WebDriverException:
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def _scope_xpath(xpath):
+    """把绝对 XPath（`//…`）改成相对当前节点的形式（`.//…`）。
+
+    ⚠️ **这是 Selenium 的一个大坑**：`element.find_elements(By.XPATH, "//button")`
+       **不是**在 element 子树里找，而是**从整个文档根**找 —— 绝对路径 `//` 会忽略
+       调用它的元素。只有写成 `.//`（相对当前节点）才真正限定在子树内。
+       实测就栽在这：收藏弹窗里找「确定」，结果返回了页面上那个无关的「确定」，
+       点击时报 `element click intercepted`（因为它被弹窗遮住了）。
+    """
+    if xpath.startswith("//"):
+        return "." + xpath
+    return xpath
+
+
+def _find_in_modal(modal, driver, xpaths, require_text=None):
+    """在**弹窗范围内**找元素（限定范围是关键：详情页别处也有「确定」「收藏」）。
+
+    require_text 给了就要求文案精确等于它。XPath 会先转成 `.//` 相对形式，
+    否则会退化成全文档查找（见 `_scope_xpath`）。
+    """
+    for xpath in xpaths:
+        try:
+            elements = modal.find_elements(By.XPATH, _scope_xpath(xpath))
+        except (StaleElementReferenceException, WebDriverException):
+            continue
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+                size = element.size
+                if size["width"] == 0 or size["height"] == 0:
+                    continue
+                if require_text is not None:
+                    if _element_text(driver, element).strip() != require_text:
+                        continue
+                return element
+            except (StaleElementReferenceException, WebDriverException):
+                continue
+    return None
+
+
+def follow_author(driver, username="", password=""):
+    """右侧作者信息下方**有关注按钮就点**，已是「已关注」则忽略。
+
+    ⚠️ 「关注」二字在页头导航里也有（顶部「关注」标签），必须限定在作者卡片内 ——
+       用「私信」按钮当锚点找同一区域内它的兄弟/祖先范围内的「关注」。
+    """
+    # 先看是不是已经关注了 —— 已关注就不用点（点了会变成取消关注！）
+    author_area = _find_author_area(driver)
+    if author_area is not None:
+        try:
+            area_text = _element_text(driver, author_area)
+        except WebDriverException:
+            area_text = ""
+        if any(m in area_text for m in AUTHOR_FOLLOWED_MARKERS):
+            print("===> 作者已是「已关注」，跳过")
+            return "关注跳过（已关注）"
+
+    button, hit = wait_visible(driver, AUTHOR_FOLLOW_XPATHS, 8, "作者关注按钮")
+    if button is None:
+        print("[WARN] 右侧作者区未找到「关注」按钮（可能已关注或结构变了）")
+        return "关注跳过（未找到关注按钮）"
+
+    if not _click_element(driver, button, "关注作者"):
+        return "关注失败（按钮点击失败）"
+
+    time.sleep(1.5)
+    try:
+        after = _element_text(driver, button).strip()
+    except WebDriverException:
+        after = ""
+    if any(m in after for m in AUTHOR_FOLLOWED_MARKERS):
+        print("===> 关注成功，按钮已变为 %r" % after)
+        return "已关注作者"
+    print("===> 已点击关注（按钮文案变为 %r）" % after)
+    return "已关注作者"
+
+
+def _find_author_area(driver):
+    """定位右侧作者信息卡（用「私信」按钮当锚点往上找容器）。"""
+    try:
+        return driver.execute_script(
+            """
+            var els = document.querySelectorAll('button, div, span, a');
+            for (var i = 0; i < els.length; i++) {
+              var e = els[i];
+              if ((e.textContent || '').trim() !== '私信') continue;
+              var p = e.parentElement;
+              for (var hop = 0; hop < 4 && p; hop++, p = p.parentElement) {
+                var r = p.getBoundingClientRect();
+                if (r.width > 150 && r.height > 100) return p;
+              }
+            }
+            return null;
+            """
+        )
+    except WebDriverException:
+        return None
+
+
+def _click_element(driver, element, label=""):
+    """点一个元素：常规点击 → JS 点击两级降级。成功返回 True。"""
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+        time.sleep(0.3)
+    except WebDriverException:
+        pass
+    try:
+        element.click()
+        return True
+    except WebDriverException as err:
+        print("[WARN] %s 常规点击失败(%s)，改用 JS 点击" % (label, str(err)[:60]))
+        try:
+            driver.execute_script("arguments[0].click();", element)
+            return True
+        except WebDriverException as err2:
+            print("[WARN] %s JS 点击也失败: %s" % (label, str(err2)[:60]))
+            return False
+
+
+def notify(bot_id, status, ores="", note="", lottery="", reward="",
+           pin="", pin_text="", likes="", like="", collect="", follow=""):
     """推一张飞书卡片。推送失败只告警，绝不因此把签到判成失败。"""
     content = ["**签到状态**: %s" % status]
     content.append("**当前矿石数**: %s" % (ores or "未读取到"))
@@ -1215,6 +2555,18 @@ def notify(bot_id, status, ores="", note="", lottery="", reward=""):
         content.append("**免费抽奖**: %s" % lottery)
     if reward:
         content.append("**抽奖奖励**: %s" % reward)
+    if pin:
+        content.append("**发沸点**: %s" % pin)
+    if pin_text:
+        content.append("**沸点内容**: %s" % pin_text)
+    if likes:
+        content.append("**点赞**: %s" % likes)
+    if like:
+        content.append("**文章点赞**: %s" % like)
+    if collect:
+        content.append("**文章收藏**: %s" % collect)
+    if follow:
+        content.append("**关注作者**: %s" % follow)
     if note:
         content.append("**错误信息**: %s" % note)
     content.append("**时间**: %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1267,6 +2619,12 @@ def juejin(username="", password="", cookie="", bot_id=""):
     ores = ""
     lottery = ""
     reward = ""
+    pin = ""
+    pin_text = ""
+    likes = ""
+    art_like = ""
+    art_collect = ""
+    art_follow = ""
     driver = get_web_driver()
     try:
         # 优先账号密码（会自动过滑块验证码）；滑块被行为风控拦下时，若配了 Cookie 就降级用它
@@ -1319,6 +2677,19 @@ def juejin(username="", password="", cookie="", bot_id=""):
         # 福利中心顶部胶囊的矿石数是**抽奖后**的最新值，比签到页文案更准，优先用它
         ores = center_ores or ores
         print("===> 最终矿石数: %s / 抽奖: %s %s" % (ores or "未读取到", lottery, reward))
+
+        # 抽奖完成后回首页 → 沸点广场：发一条沸点 + 给两名好友点赞（跑 PINS_ROUNDS 遍）。
+        # 跟抽奖同理，**失败不影响签到结论**（pins_activity 内部已兜住异常）。
+        pin, pin_text, like_status, liked_items = pins_activity(driver, username, password)
+        likes = like_status
+        if liked_items:
+            likes = "%s（%s）" % (like_status, " / ".join(liked_items))
+        print("===> 沸点: %s / %s" % (pin, likes))
+
+        # 两遍沸点都跑完 → 回首页点第一篇文章 → 点赞 + 收藏 + 关注作者。
+        # 同样**失败不影响签到结论**。
+        art_like, art_collect, art_follow = article_activity(driver, username, password)
+        print("===> 文章: %s / %s / %s" % (art_like, art_collect, art_follow))
     except Exception as err:
         status = "签到失败"
         note = str(err)[:200]
@@ -1329,7 +2700,8 @@ def juejin(username="", password="", cookie="", bot_id=""):
         except Exception as err:
             print("[WARN] 关闭浏览器失败: %s" % err)
         if bot_id:
-            notify(bot_id, status, ores, note, lottery, reward)
+            notify(bot_id, status, ores, note, lottery, reward, pin, pin_text, likes,
+                   art_like, art_collect, art_follow)
 
 
 if __name__ == "__main__":

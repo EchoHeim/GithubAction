@@ -24,7 +24,28 @@ from selenium.common.exceptions import (
 print("\n==== 环境检测 ====\n")
 
 
+def _bypass_proxy_for_localhost():
+    """把 localhost 从代理里摘出去。
+
+    ⚠️ 本机开着代理（HTTP_PROXY/HTTPS_PROXY）又没设 NO_PROXY 时，
+    Selenium 连**本机 chromedriver** 的 HTTP 请求也会被代理接管；
+    代理不认识 /session/<id>/execute/... 这种路径，直接回 `unhandled request`。
+    症状很阴：session 能正常建起来（browserVersion 也读得到），
+    但后面每一步操作全失败 —— 看着像元素定位问题，其实是环境问题（实测 2026-10-02）。
+    localhost 本来就不该走代理，这里补上；只追加、不覆盖用户已有配置。
+    """
+    hosts = ("localhost", "127.0.0.1", "::1")
+    for key in ("NO_PROXY", "no_proxy"):
+        parts = [p.strip() for p in (os.environ.get(key) or "").split(",") if p.strip()]
+        lowered = [p.lower() for p in parts]
+        for host in hosts:
+            if host not in lowered:
+                parts.append(host)
+        os.environ[key] = ",".join(parts)
+
+
 def get_web_driver():
+    _bypass_proxy_for_localhost()
     service = Service()
     options = webdriver.ChromeOptions()
     options.add_argument("--no-sandbox")
