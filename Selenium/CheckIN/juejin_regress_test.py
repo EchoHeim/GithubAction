@@ -32,10 +32,10 @@ T28 关标签回首页 / T29 第 2 篇重复一遍 / T30 article_activity 端到
 T31 XPath 序号替换
 
 跑法（脚本内已自动绕开 localhost 代理，一般直接跑即可）：
-    python -B Selenium/Check-in/juejin_regress_test.py
+    python -B Selenium/CheckIN/juejin_regress_test.py
     # 万一仍报 unhandled request，说明代理把 localhost 也接管了，手工兜底：
     # env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \\
-    #     python -B Selenium/Check-in/juejin_regress_test.py
+    #     python -B Selenium/CheckIN/juejin_regress_test.py
 
 只测判据与选择器，不发飞书、不碰真实账号。
 """
@@ -597,12 +597,34 @@ def main():
             fails.append("T19 二次点赞重复点了已赞的沸点: %r" % liked_again)
 
         # ── 两遍沸点 + 文章详情页（2026-10-01 第二轮）──
-        # T20：沸点轮次文案 —— 第二轮必须与第一轮**不同**（避免被当重复内容）
+        # T20：固定文案模式下（设了 JUEJIN_PINS_TEXT）两轮文案必须不同，避免被当重复内容
         t1 = m._round_text("测试文案", 1)
         t2 = m._round_text("测试文案", 2)
         print("[T20] 轮次文案: 第1轮=%r 第2轮=%r (期望不同)" % (t1, t2))
         if t1 != "测试文案" or t2 == t1:
             fails.append("T20 轮次文案不符合预期: %r / %r" % (t1, t2))
+
+        # T20b：随机文案池（2026-10-05 追加）—— 20 条池、每次运行随机抽、
+        #      同一轮次内不重样、且都取自池内
+        saved_pins_text = m.PINS_TEXT
+        m.PINS_TEXT = ""
+        pool = list(m.PINS_TEXT_POOL)
+        if len(pool) != 20 or len(set(pool)) != 20:
+            fails.append("T20b 文案池应为 20 条不重复内容，实得 %d 条" % len(pool))
+        picked = m.pick_pin_texts(2)
+        if len(picked) != 2 or picked[0] == picked[1]:
+            fails.append("T20b 两轮文案应抽到不同内容: %r" % (picked,))
+        if any(t not in pool for t in picked):
+            fails.append("T20b 抽出的文案不在池内: %r" % (picked,))
+        # 多跑几次，确认确实在随机（不能恒定同一条）
+        seen = set()
+        for _ in range(12):
+            seen.update(m.pick_pin_texts(1))
+        if len(seen) < 5:
+            fails.append("T20b 文案池看起来没在随机（12 次只出现 %d 种）" % len(seen))
+        print("[T20b] 随机文案池: 池=%d 条 抽2轮=%r 12次出现 %d 种"
+              % (len(pool), picked, len(seen)))
+        m.PINS_TEXT = saved_pins_text
 
         # T21：多轮结果折叠文案（两轮相同 → ×2；不同 → 逐轮列）
         same = m._join_rounds(["已发布沸点", "已发布沸点"], "已发布沸点")
@@ -616,14 +638,19 @@ def main():
         # T22：整条沸点流程跑两遍（间隔在生产是 120s，测试里压到 1s 省时间）
         m.PINS_ROUNDS = 2
         m.PINS_ROUND_GAP = 1
+        m.PINS_TEXT = ""  # 走随机文案池（默认行为）
         driver.get(base + "/pins")
         time.sleep(1.5)
         pub, content, lk, liked_all = m.pins_activity(driver)
         print("[T22] 两遍沸点: pub=%r content=%r lk=%r" % (pub, content, lk))
         if "×2" not in pub and "第 2 轮" not in pub:
             fails.append("T22 沸点应跑两遍，实得 pub=%r" % pub)
-        if "（2）" not in content:
-            fails.append("T22 第二轮内容应带轮次后缀，实得 %r" % content)
+        # 随机文案池：两轮内容应**不同且都不带轮次后缀**（文案本身已不同）
+        parts = [c for c in content.split(" / ") if c]
+        if len(parts) != 2 or parts[0] == parts[1]:
+            fails.append("T22 两轮内容应为两条不同文案: %r" % content)
+        if "（2）" in content:
+            fails.append("T22 随机文案池下不该加轮次后缀: %r" % content)
 
         # ── 文章详情页（新标签页 + 第二篇重复）──
         # T23：点第一篇文章 —— ⚠️ 它带 target=_blank，会**新开标签页**。

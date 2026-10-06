@@ -55,16 +55,17 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
 ⚠️ 别扫整页文案找「恭喜/抽中」—— 页面右侧「围观大奖」栏一直在播报**别人**的中奖，
 扫整页必然误报（第 1 轮就是这么把「一下没抽」报成「抽奖成功」的）。
 
-回归测试：`python -B Selenium/Check-in/juejin_regress_test.py`（合成 DOM，29 项断言）。
+回归测试：`python -B Selenium/CheckIN/juejin_regress_test.py`（合成 DOM，29 项断言）。
 改选择器后务必重跑；跑之前要清代理（见 LOCAL_RUN.md）。
 
 ━━━ 沸点广场：发一条沸点 + 给好友点赞（2026-10-01 新增）━━━
 签到 + 抽奖都完成后，**回首页 → 点导航栏「沸点」→ 沸点广场**：
-  1. 在顶部输入框写一句话（默认 `JUEJIN_PINS_TEXT`）→ 点「发布」；
+  1. 在顶部输入框写一句话（文案从 20 条池子里**随机抽**，见 `pick_pin_texts`）→ 点「发布」；
   2. 在沸点列表里给 **2 名好友**的沸点点「点赞」。
 **这套流程跑 `JUEJIN_PINS_ROUNDS` 遍（默认 2 遍），两遍之间隔 `JUEJIN_PINS_GAP` 秒（默认 120）**
 （lodge 要求「这两个任务执行两遍，两次之间间隔 120 秒」）。
-第 2 轮起文案自动加轮次后缀（`今天也要…~（2）`），避免与第一轮一字不差被当重复内容。
+沸点文案默认从 `PINS_TEXT_POOL`（20 条）里每次运行**随机抽**（lodge 2026-10-05 追加），
+同一轮次内不重样；`JUEJIN_PINS_TEXT` 显式配置时才固定用那一条。
 按 lodge 给的截图实现，两条主原则与前文一致：
   · **认页面内容、不认 URL**（`_on_pins_page()`，双向判据）；
   · **不扫整页文案找「发布成功 / 赞」** —— 右侧「精选沸点」栏一直在播别人的内容，
@@ -94,7 +95,7 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
 跟抽奖一样：**沸点与文章流程的任何失败都不影响签到结论与退出码**，只记进卡片备注。
 
 用法（凭据走环境变量）：
-    JUEJIN_USERNAME=手机号 JUEJIN_PASSWORD=密码 python -m Selenium.Check-in.juejin
+    JUEJIN_USERNAME=手机号 JUEJIN_PASSWORD=密码 python -m Selenium.CheckIN.juejin
     # 兼容老写法：python -m ... <手机号/邮箱> <密码> [飞书机器人 webhook]
 
 可选环境变量：
@@ -107,7 +108,7 @@ iframe : https://rmc.bytedance.com/verifycenter/captcha/v2?from=iframe&fp=verify
     JUEJIN_LOTTERY=0     关掉免费抽奖（只签到不抽奖）
     JUEJIN_PINS_URL      沸点广场，默认 https://juejin.cn/pins
     JUEJIN_PINS=0        关掉沸点流程（只签到 + 抽奖）
-    JUEJIN_PINS_TEXT     要发的沸点内容，默认「今天也要好好写代码呀~」
+    JUEJIN_PINS_TEXT     固定沸点内容（默认空=从 20 条池子里随机抽；设置后每次都发这一条）
     JUEJIN_PINS_LIKES    每轮要点赞的好友数，默认 2
     JUEJIN_PINS_ROUNDS   沸点流程跑几遍，默认 2
     JUEJIN_PINS_GAP      两遍之间的间隔秒数，默认 120
@@ -432,8 +433,35 @@ PINS_NOT_FRIEND_MARKERS = ("关注", "已关注")
 PINS_FRIEND_MARKERS = ("已关注",)  # 已关注 = 好友
 # 点赞目标数量：lodge 要「两名好友」
 PINS_LIKE_TARGET = int(os.getenv("JUEJIN_PINS_LIKES", "2"))
-# 沸点文案（lodge 说「随便写一句话」；给个默认值，也允许环境变量覆盖）
-PINS_TEXT = os.getenv("JUEJIN_PINS_TEXT", "今天也要好好写代码呀~")
+# 沸点文案池：20 条。**每次运行随机抽**（lodge 2026-10-05 追加）——
+#   之前固定发「今天也要好好写代码呀~」，天天同一句像刷屏，也容易被判重复内容。
+#   规则：① 同一轮次内不重样（两轮抽到两条不同文案）；
+#        ② 轮次数超过池子大小时才退回「随机 + 轮次后缀」。
+#   JUEJIN_PINS_TEXT 一旦显式设置，则**固定用那一条**（留个手动兜底的口子）。
+PINS_TEXT_POOL = (
+    "今天也要好好写代码呀~",
+    "又和这个 Bug 斗智斗勇到半夜",
+    "需求又改了第 8 版，麻了",
+    "上线前发现漏了个空指针，救命",
+    "今天的代码能跑，昨天的不能",
+    "重构完代码行数少了一半，舒服",
+    "写代码三小时，debug 两小时",
+    "谁把生产环境日志关掉的？",
+    "摸鱼十分钟，续命",
+    "这个报错我认识它，它不认识我",
+    "需求文档一个字没看，代码写完了",
+    "咖啡续命第 3 杯，眼睛开始花",
+    "一次提交，五个文件，六个 bug",
+    "终于把那个祖传 if-else 拆开了",
+    "周末不加班，奖励自己一把游戏",
+    "学到新姿势：原来可以这么写",
+    "别问，问就是重构的代价",
+    "代码能跑 == 没问题（薛定谔的测试）",
+    "今天摸鱼有收获，摸到了新 API",
+    "写完最后一版需求，直接睡了",
+)
+# 显式配置（默认空 = 走随机池）。设置了就是唯一文案，轮次后缀逻辑照旧生效
+PINS_TEXT = os.getenv("JUEJIN_PINS_TEXT", "").strip()
 # 沸点流程要跑几遍（lodge 要求「执行两遍」）+ 两遍之间的间隔秒数
 PINS_ROUNDS = max(1, int(os.getenv("JUEJIN_PINS_ROUNDS", "2")))
 PINS_ROUND_GAP = int(os.getenv("JUEJIN_PINS_GAP", "120"))
@@ -1836,7 +1864,7 @@ def _click_like(driver, button):
 
 
 def _round_text(base, round_no):
-    """第 N 轮的沸点文案。
+    """固定文案模式下，第 N 轮的文案。
 
     ⚠️ 第二轮**不能跟第一轮一字不差**：① 看起来像刷屏；② 有些站点对
     「短时间内完全相同的重复内容」会直接拦（甚至当垃圾内容处理）。
@@ -1845,6 +1873,26 @@ def _round_text(base, round_no):
     if round_no <= 1:
         return base
     return "%s（%d）" % (base, round_no)
+
+
+def pick_pin_texts(rounds=1):
+    """给本次运行的 rounds 轮各挑一条沸点文案，返回长度 == rounds 的列表。
+
+    优先级：
+      1. `JUEJIN_PINS_TEXT` 有值 → 固定文案 + 轮次后缀（老行为，便于手动兜底）；
+      2. 否则从 `PINS_TEXT_POOL` 里**无放回随机**抽 —— 同一轮次内绝不重复，
+         既然文案本身已经不同，就**不再加轮次后缀**；
+      3. 轮次数超过池子容量（极端情况）→ 随机取一条并加轮次后缀兜底防重复。
+    """
+    rounds = max(1, int(rounds))
+    if PINS_TEXT:
+        return [_round_text(PINS_TEXT, i + 1) for i in range(rounds)]
+
+    pool = list(PINS_TEXT_POOL)
+    random.shuffle(pool)
+    if rounds <= len(pool):
+        return pool[:rounds]
+    return [_round_text(random.choice(pool), i + 1) for i in range(rounds)]
 
 
 def pins_activity(driver, username="", password=""):
@@ -1856,12 +1904,18 @@ def pins_activity(driver, username="", password=""):
 
     返回 (发沸点状态, 发出内容, 点赞状态, 点赞明细)。**任何一步失败都不抛异常**
     —— 跟抽奖一个原则：签到已经成功了，沸点挂掉不该把当天的签到判成失败。
+    文案由 `pick_pin_texts` 在轮次循环外一次性抽好，每轮不重样。
     """
     if not PINS_ENABLED:
         print("===> JUEJIN_PINS=0，跳过沸点流程")
         return "已关闭（JUEJIN_PINS=0）", "", "", []
 
     pub_statuses, contents, like_statuses, all_liked = [], [], [], []
+    # 一次运行先把 N 轮的文案抽好（同一轮次内不重复），别在循环里现抽 ——
+    # 抽一次、打印一次，运行日志里能直接看到「今天发的是哪几条」。
+    round_texts = pick_pin_texts(PINS_ROUNDS)
+    print("===> 本次沸点文案: %s" % " / ".join(t[:24] for t in round_texts))
+
     for round_no in range(1, PINS_ROUNDS + 1):
         # 两轮之间先歇够间隔 —— lodge 明确要 120 秒。放在轮首而不是轮尾，
         # 是为了让「第一轮跑完 → 等 120s → 第二轮」这个语义一眼能看出来。
@@ -1880,7 +1934,7 @@ def pins_activity(driver, username="", password=""):
                 like_statuses.append("")
                 continue
 
-            text = _round_text(PINS_TEXT, round_no)
+            text = round_texts[round_no - 1]
             pub_status, content = publish_pin(driver, text, username, password)
             print("===> 第 %d 轮发沸点: %s（内容 %r）" % (round_no, pub_status, (content or "")[:40]))
             pub_statuses.append(pub_status)
@@ -2709,7 +2763,7 @@ if __name__ == "__main__":
         os.getenv(k) for k in ("JUEJIN_COOKIE", "JUEJIN_USERNAME", "JUEJIN_PASSWORD")
     ):
         sys.exit(
-            "用法: python -m Selenium.Check-in.juejin\n"
+            "用法: python -m Selenium.CheckIN.juejin\n"
             "  凭据走环境变量: JUEJIN_COOKIE（推荐）/ JUEJIN_USERNAME + JUEJIN_PASSWORD\n"
             "  也兼容老写法: python -m ... <手机号/邮箱> <密码> [飞书机器人 webhook]"
         )

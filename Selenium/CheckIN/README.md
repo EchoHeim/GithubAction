@@ -6,6 +6,10 @@
 - gamekegs.py 保存了[gamekegs](https://gamekegs.com/)网站自动签到脚本
 - juejin.py 保存了[掘金](https://juejin.cn/)网站自动签到脚本
 - 91.py保存了[91tvg](https://www.91tvg.com/)网站自动签到脚本
+- ns211.py 保存了 [NS中文网](https://www.ns211.com/) 自动签到脚本（WordPress + ripro 主题，
+  登录/签到都走 `admin-ajax.php`，且**没有验证码**，所以直接用账号密码自动化）。
+  凭据：Secrets 里的 `NS211_USERNAME` + `NS211_SECRET`（⚠️ 是 SECRET 不是 PASSWORD）。
+  本地跑：`python Selenium/CheckIN/run_local.py ns211`
 
 ### 使用方法
 

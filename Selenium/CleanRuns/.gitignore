@@ -1,0 +1,10 @@
+# 浏览器 profile（含 GitHub 登录 cookie，严禁入库）
+.browser-profile/
+
+# 运行日志
+gh-runs-delete-*.log
+final-state.png
+fail-*.png
+
+# 成功截图要入库（README 里引用），仅排除临时截图
+!screenshot-proof.png

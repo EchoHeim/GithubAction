@@ -7,10 +7,10 @@
 「贡献值 / 热心值 / 悬赏值 / 总积分」串位。
 
 跑法（需要本机 Chrome + chromedriver）：
-    python -B Selenium/Check-in/52pojie_credit_test.py
+    python -B Selenium/CheckIN/52pojie_credit_test.py
 
 只跑纯逻辑那一半（不起浏览器，只校验判定函数）：
-    python -B Selenium/Check-in/52pojie_credit_test.py --offline
+    python -B Selenium/CheckIN/52pojie_credit_test.py --offline
 """
 
 import importlib
@@ -20,7 +20,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-p52 = importlib.import_module("Selenium.Check-in.52pojie")
+p52 = importlib.import_module("Selenium.CheckIN.52pojie")
 
 # 把 CREDIT_EXTRACT_JS 装进一个函数体，塞进合成 DOM 里跑
 HARNESS = r"""

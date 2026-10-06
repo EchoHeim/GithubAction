@@ -15,5 +15,5 @@ if not exist "%PY%" (
 )
 
 cd /d "%REPO%"
-"%PY%" -B "Selenium\Check-in\run_local.py"
+"%PY%" -B "Selenium\CheckIN\run_local.py"
 exit /b %ERRORLEVEL%

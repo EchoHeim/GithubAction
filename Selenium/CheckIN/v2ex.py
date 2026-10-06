@@ -496,6 +496,6 @@ def v2ex(username, password, bot_id=""):
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         sys.exit(
-            "用法: python -m Selenium.Check-in.v2ex <用户名> <密码> [飞书机器人 webhook]"
+            "用法: python -m Selenium.CheckIN.v2ex <用户名> <密码> [飞书机器人 webhook]"
         )
     v2ex(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "")

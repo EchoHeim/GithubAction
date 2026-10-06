@@ -36,13 +36,13 @@ CHECKIN_HEADLESS=1
 手动跑一次（能看到浏览器和实时输出）：
 
 ```bat
-Selenium\Check-in\run_local.bat
+Selenium\CheckIN\run_local.bat
 ```
 
 或者直接调 Python：
 
 ```bash
-C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/Check-in/run_local.py
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/CheckIN/run_local.py
 ```
 
 ## 跑其它站点（52pojie / 掘金）
@@ -51,10 +51,10 @@ C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Sel
 
 ```bash
 # 吾爱破解
-C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/Check-in/run_local.py 52pojie
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/CheckIN/run_local.py 52pojie
 
 # 掘金
-C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/Check-in/run_local.py juejin
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/CheckIN/run_local.py juejin
 ```
 
 各自的凭据在 `.env.local` 里填对应的一组：`PJ52_COOKIE`、
@@ -226,14 +226,14 @@ JUEJIN_ARTICLE_COUNT=2   # 文章做几篇，默认 2（做完一篇回首页点
 `badge|red-dot|count|unread`** 的数字直接判死。回归测试的 T4 专门放了 4 位数页头角标
 （`消息 1234` / `未读 5678`）来守它。
 
-**回归测试**：`Selenium/Check-in/juejin_regress_test.py`（合成 DOM，还原上述全部陷阱，
+**回归测试**：`Selenium/CheckIN/juejin_regress_test.py`（合成 DOM，还原上述全部陷阱，
 **33 项断言**，含沸点流程 T11~T22、文章详情页 T23~T31 与 T24b）。改动选择器后**务必重跑**：
 
 ```bash
-python -B Selenium/Check-in/juejin_regress_test.py
+python -B Selenium/CheckIN/juejin_regress_test.py
 # 代理问题已在脚本内自动绕开；万一仍报 unhandled request，手工兜底：
 # env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
-#   python -B Selenium/Check-in/juejin_regress_test.py
+#   python -B Selenium/CheckIN/juejin_regress_test.py
 ```
 
 
@@ -306,8 +306,8 @@ PJ52_CREDIT_URL=https://www.52pojie.cn/home.php?mod=spacecp&ac=credit  # 吾爱�
 或相关选择器就重跑：
 
 ```bash
-python -B Selenium/Check-in/52pojie_credit_test.py            # 含合成 DOM（要 Chrome）
-python -B Selenium/Check-in/52pojie_credit_test.py --offline  # 只跑纯逻辑
+python -B Selenium/CheckIN/52pojie_credit_test.py            # 含合成 DOM（要 Chrome）
+python -B Selenium/CheckIN/52pojie_credit_test.py --offline  # 只跑纯逻辑
 ```
 
 用例覆盖：截图里的真实结构（`dt` 标签 + `dd > em` 数字）、`credit_num` 老模板、
@@ -373,7 +373,7 @@ Request Headers 里的 `cookie:` 整行，或右键 Copy as cURL）——掘金�
 聚宽有**自研的拼图滑块风控**，登录和签到都可能弹（触发时登录接口返回 `code=105`）。
 所以本机运行做了两件事：
 
-1. **固定浏览器 profile**：`Selenium/Check-in/.browser-profile/`。
+1. **固定浏览器 profile**：`Selenium/CheckIN/.browser-profile/`。
    Chrome 用它启动，登录 cookie 留在里面，第二天跑的时候直接复用，**不用重新登录**。
    （该目录已在 `.gitignore` 里 —— 里面有你的登录 cookie，别提交。）
 2. **首次运行需要你盯一下**：第一次跑会真的登录一次。如果弹出滑块验证码
@@ -382,7 +382,7 @@ Request Headers 里的 `cookie:` 整行，或右键 Copy as cURL）——掘金�
 想从头来过（比如怀疑 cookie 失效），删掉 profile 目录再跑：
 
 ```bat
-rmdir /s /q "Selenium\Check-in\.browser-profile"
+rmdir /s /q "Selenium\CheckIN\.browser-profile"
 ```
 
 > **已知限制**：如果**签到动作本身**弹滑块，当前脚本不会自动识别 —— 日志里会看到签到失败。
@@ -408,7 +408,7 @@ rmdir /s /q "Selenium\Check-in\.browser-profile"
 每次运行同时打印到控制台并落盘：
 
 ```
-Selenium/Check-in/logs/joinquant-YYYY-MM-DD.log
+Selenium/CheckIN/logs/joinquant-YYYY-MM-DD.log
 ```
 
 跑完最后一行会给结论（是否检测到失败标记），失败时附上对应的原文。
@@ -435,7 +435,7 @@ Selenium/Check-in/logs/joinquant-YYYY-MM-DD.log
 3. **系统依赖** —— `opencv-python` 需要 `libgl1` 和 `libglib2.0-0`。
 
 ```bash
-22 6 * * * cd /path/to/GithubAction && /path/to/python -u Selenium/Check-in/run_local.py >> Selenium/Check-in/logs/cron.log 2>&1
+22 6 * * * cd /path/to/GithubAction && /path/to/python -u Selenium/CheckIN/run_local.py >> Selenium/CheckIN/logs/cron.log 2>&1
 ```
 
 ## 线上怎么办

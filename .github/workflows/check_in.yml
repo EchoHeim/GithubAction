@@ -20,6 +20,7 @@ on:
           - v2ex
           - 52pojie
           - juejin
+          - ns211
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -35,11 +36,11 @@ jobs:
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Runs a single command using the runners shell
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: 3.10.*
 
@@ -55,7 +56,7 @@ jobs:
       - name: Prepare chromedriver
         uses: nanasess/setup-chromedriver@v2
 
-      # JoinQuant 签到已移到本机跑，见 Selenium/Check-in/LOCAL_RUN.md。
+      # JoinQuant 签到已移到本机跑，见 Selenium/CheckIN/LOCAL_RUN.md。
       # GitHub 托管 runner 出口 IP 在海外，会被聚宽的地区风控直接拦掉
       # （页面返回「当前地区暂不支持访问」，登录接口 405 + 非 JSON），改代码没用 —— 别再把它加回来。
 
@@ -69,7 +70,7 @@ jobs:
           CHECKIN_USERNAME: ${{ secrets.FISHPI_USERNAME }}
           CHECKIN_PASSWORD: ${{ secrets.FISHPI_PASSWORD }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
-        run: python -B -m Selenium.Check-in.fishpi "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
+        run: python -B -m Selenium.CheckIN.fishpi "$CHECKIN_USERNAME" "$CHECKIN_PASSWORD" "$FEISHU_BOT_ID"
 
       - name: Check in V2EX
         if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'v2ex') }}
@@ -78,13 +79,13 @@ jobs:
           V2EX_USERNAME: ${{ secrets.V2EX_USERNAME }}
           V2EX_PASSWORD: ${{ secrets.V2EX_PASSWORD }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID }}
-        run: python -B -m Selenium.Check-in.v2ex "$V2EX_USERNAME" "$V2EX_PASSWORD" "$FEISHU_BOT_ID"
+        run: python -B -m Selenium.CheckIN.v2ex "$V2EX_USERNAME" "$V2EX_PASSWORD" "$FEISHU_BOT_ID"
 
       # V2EX 靠验证码 OCR + 重试，失败原因从日志里看不全。把现场（验证码原图、
       # 失败页 DOM、截图、页面提示文案）传成 artifact，排查不用再靠猜。
       - name: Upload V2EX diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: v2ex-debug
           path: v2ex-debug/
@@ -103,7 +104,7 @@ jobs:
         env:
           PJ52_COOKIE: ${{ secrets.PJ52_COOKIE || vars.PJ52_COOKIE }}
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
-        run: python -B -m Selenium.Check-in.52pojie
+        run: python -B -m Selenium.CheckIN.52pojie
 
       # 掘金与 52pojie 同理：密码登录会被字节系风控要求「抖音 APP 扫码验身」，
       # 自动化走不通 —— 凭据用登录态 Cookie（JUEJIN_COOKIE），跳过登录页。
@@ -121,15 +122,37 @@ jobs:
           FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
           # 字节验证码对无头很敏感 → 用 xvfb 虚拟显示器跑**有头**模式（base.py 认这个开关）
           CHECKIN_HEADLESS: "0"
-        run: xvfb-run -a python -B -m Selenium.Check-in.juejin
+        run: xvfb-run -a python -B -m Selenium.CheckIN.juejin
 
       - name: Upload 52pojie / JueJin diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: new-sites-debug
           path: |
             52pojie-debug/
             juejin-debug/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # NS中文网：WordPress + ripro 主题，登录/签到都走 admin-ajax.php，
+      # 且页面里 tencent_captcha.is 为空 —— **没有验证码**，所以能直接用账号密码自动化。
+      # ⚠️ Secret 名字是 NS211_SECRET（不是 NS211_PASSWORD），这里两套拼写都取一遍，
+      #    免得改名/不同步时又出现「用户名有值、密码 0 字」这种看不见的坑。
+      - name: Check in NS中文网
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'ns211') }}
+        timeout-minutes: 10
+        env:
+          NS211_USERNAME: ${{ secrets.NS211_USERNAME || vars.NS211_USERNAME }}
+          NS211_SECRET: ${{ secrets.NS211_SECRET || secrets.NS211_PASSWORD || vars.NS211_SECRET || vars.NS211_PASSWORD }}
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
+        run: python -B -m Selenium.CheckIN.ns211
+
+      - name: Upload NS211 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ns211-debug
+          path: ns211-debug/
           if-no-files-found: ignore
           retention-days: 7

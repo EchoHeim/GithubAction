@@ -12,6 +12,7 @@ futu-debug/
 v2ex-debug/
 52pojie-debug/
 juejin-debug/
+ns211-debug/
 
 # Distribution / packaging
 .Python
@@ -109,9 +110,9 @@ celerybeat.pid
 *.sage.py
 
 # 本地运行凭据（含账号密码，严禁入库）
-Selenium/Check-in/.env.local
+Selenium/CheckIN/.env.local
 # 浏览器 profile（含登录 cookie，严禁入库）
-Selenium/Check-in/.browser-profile/
+Selenium/CheckIN/.browser-profile/
 
 # Environments
 .env

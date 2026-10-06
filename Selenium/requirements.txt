@@ -7,3 +7,4 @@ opencv-python>=4.8,<5
 retrying==1.3.3
 yagmail==0.15.293
 beautifulsoup4==4.12.2
+websocket-client>=1.6.0

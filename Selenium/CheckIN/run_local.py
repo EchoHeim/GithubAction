@@ -5,9 +5,10 @@ CI 上凭据来自 GitHub Secrets，以命令行参数传给签到脚本；本�
 所以凭据放在同目录的 .env.local（已 gitignore），由本脚本读取后透传。
 
 用法：
-    python Selenium/Check-in/run_local.py            # 默认跑聚宽（定时任务用的就是这条）
-    python Selenium/Check-in/run_local.py 52pojie    # 跑吾爱破解
-    python Selenium/Check-in/run_local.py juejin     # 跑掘金
+    python Selenium/CheckIN/run_local.py            # 默认跑聚宽（定时任务用的就是这条）
+    python Selenium/CheckIN/run_local.py 52pojie    # 跑吾爱破解
+    python Selenium/CheckIN/run_local.py juejin     # 跑掘金
+    python Selenium/CheckIN/run_local.py ns211      # 跑 NS中文网签到
 
 不带参数时行为与历史版本完全一致（聚宽 + joinquant-YYYY-MM-DD.log），
 计划任务 JoinQuantCheckIn 不受影响。
@@ -28,7 +29,7 @@ import sys
 #   log/title 日志名与表头
 SITES = {
     "joinquant": {
-        "module": "Selenium.Check-in.JoinQuant",
+        "module": "Selenium.CheckIN.JoinQuant",
         "args": ("JQ_USERNAME", "JQ_PASSWORD", "FEISHU_BOT_ID"),
         "required": (("JQ_USERNAME", "JQ_PASSWORD"),),
         "log": "joinquant",
@@ -36,7 +37,7 @@ SITES = {
     },
     "52pojie": {
         # 只用 Cookie 登录（密码登录已移除：登录页是 Cloudflare Turnstile，本机线路到不了它）
-        "module": "Selenium.Check-in.52pojie",
+        "module": "Selenium.CheckIN.52pojie",
         "args": (),
         "required": (("PJ52_COOKIE",),),
         "log": "52pojie",
@@ -44,11 +45,20 @@ SITES = {
     },
     "juejin": {
         # 走账号密码（脚本会自动过字节滑块验证码）；Cookie 作为可选兜底。
-        "module": "Selenium.Check-in.juejin",
+        "module": "Selenium.CheckIN.juejin",
         "args": (),
         "required": (("JUEJIN_USERNAME", "JUEJIN_PASSWORD"), ("JUEJIN_COOKIE",)),
         "log": "juejin",
         "title": "掘金签到",
+    },
+    "ns211": {
+        # NS中文网：WordPress + ripro，无验证码，走账号密码。
+        # Secret 叫 NS211_SECRET，PASSWORD 那套拼写也认（防改名不同步）。
+        "module": "Selenium.CheckIN.ns211",
+        "args": (),
+        "required": (("NS211_USERNAME", "NS211_SECRET"), ("NS211_USERNAME", "NS211_PASSWORD")),
+        "log": "ns211",
+        "title": "NS中文网签到",
     },
 }
 DEFAULT_SITE = "joinquant"
