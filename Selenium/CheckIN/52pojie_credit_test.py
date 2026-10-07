@@ -15,6 +15,7 @@
 
 import importlib
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -176,6 +177,166 @@ def run_offline_checks():
     if "**吾爱币**: 未读取到" not in card:
         failed.append("吾爱币为空时未显示「未读取到」")
     print("  [%s] 吾爱币为空 → 未读取到" % mark)
+
+    failed += _check_reply_judging()
+    failed += _check_pick_threads()
+
+    return failed
+
+
+# ── 挑帖去重（2026-10-07 加）────────────────────────────────────────────────
+# lodge 要求「回两个不同的帖子」。这里锁住关键不变式：
+#   1. 同一 tid 只算一个候选（列表里可能重复出现）；
+#   2. 挑出来的 N 个必须是 N 个**不同**的帖子 —— 挑重了等于「对同一个帖回两次」，
+#      Discuz 会拦（重复回复），更糟的是这就成了刷帖；
+#   3. 候选不够就报错，**绝不降级成重复回同一个**。
+def _check_pick_threads():
+    failed = []
+
+    # 假 driver：只实现 pick_threads 用到的两个方法
+    class FakeDriver:
+        def __init__(self, links):
+            self._links = links
+
+        def find_elements(self, by, xpath):
+            return [FakeLink(href, text) for href, text in self._links]
+
+    class FakeLink:
+        def __init__(self, href, text):
+            self._href = href
+            self._text = text
+
+        def get_attribute(self, name):
+            return self._href if name == "href" else None
+
+        @property
+        def text(self):
+            return self._text
+
+    def with_tid(n, title):
+        return ("https://www.52pojie.cn/thread-%d-1-1.html" % n, title)
+
+    # 3 个不同帖子 + 2 个重复项（同一 tid 再出现一次）
+    links = [
+        with_tid(100, "帖子A"),
+        with_tid(100, "帖子A 重复项"),
+        with_tid(200, "帖子B"),
+        with_tid(300, "帖子C"),
+        with_tid(200, "帖子B 又来一次"),
+    ]
+
+    # pick_threads 前半段是「开页面 + 过 WAF」，与去重逻辑无关且要真浏览器。
+    # 只 monkeypatch 掉这部分 —— 测试要验的是去重/抽样/兜底，不是网络。
+    original_pass_waf = p52.pass_waf
+    original_wait_ready = p52.wait_document_ready
+    original_dump = p52.dump_debug
+    p52.pass_waf = lambda driver, url, **kw: True
+    p52.wait_document_ready = lambda driver, timeout=15: True
+    p52.dump_debug = lambda *a, **kw: None
+    try:
+        picked = p52.pick_threads(FakeDriver(links), "https://x/forum-16-1.html", 2)
+        tids = [re.search(r"thread-(\d+)-", h).group(1) for _, h in picked]
+        mark = "OK " if len(set(tids)) == 2 else "FAIL"
+        if len(set(tids)) != 2:
+            failed.append("挑了 2 个帖子但有重复: %r" % tids)
+        print("  [%s] 重复项被去重、挑出 2 个不同帖子 → tid %s" % (mark, tids))
+
+        # 候选只有 1 个，却要 2 个 → 必须报错，不能拿同一个凑数
+        only_one = [with_tid(100, "帖子A"), with_tid(100, "帖子A 重复项")]
+        try:
+            p52.pick_threads(FakeDriver(only_one), "https://x/forum-16-1.html", 2)
+            failed.append("候选不足时没有报错（会变成重复回同一个帖）")
+            print("  [FAIL] 候选不足时应抛错")
+        except RuntimeError as err:
+            mark = "OK " if "不够" in str(err) else "FAIL"
+            if "不够" not in str(err):
+                failed.append("候选不足的报错没说明原因: %s" % err)
+            print("  [%s] 候选不足 → 拒绝而非重复回帖: %s" % (mark, str(err)[:50]))
+
+        # count=0 是合法的「不回」，不该报错
+        try:
+            empty = p52.pick_threads(FakeDriver(links), "https://x/forum-16-1.html", 0)
+            mark = "OK " if empty == [] else "FAIL"
+            if empty != []:
+                failed.append("count=0 应返回空列表")
+            print("  [%s] count=0 → 直接返回空列表" % mark)
+        except Exception as err:
+            failed.append("count=0 不该抛错: %s" % err)
+            print("  [FAIL] count=0 抛错: %s" % err)
+    finally:
+        p52.pass_waf = original_pass_waf
+        p52.wait_document_ready = original_wait_ready
+        p52.dump_debug = original_dump
+
+    return failed
+
+
+# ── 回帖判定（2026-10-07 加）────────────────────────────────────────────────
+# 背景：CI 上服务端明确回了「抱歉，您的请求来路不正确或表单验证串不符，无法提交」
+#（Discuz submitcheck() 的 formhash 校验失败），但日志报出来的是
+# `var STYLEID = '1', STA` —— 那是 Discuz 提示页 head 里的 JS 变量，跟报错无关。
+# 原因是 _reply_snippet 靠「marker 往前取上下文 + 按标签收尾」定位句子，
+# 在「所有 <script> 都拼进 blob」的前提下会抓到隔壁的 JS。
+#
+# 这几条断言锁住三件事：
+#   1. 报错原话能完整露出来（不再被剪成 var STYLEID）；
+#   2. formhash 类拒绝归到formhash，不被「抱歉，您」兜底吃掉；
+#   3. 分类是纯函数、离线可测（真站点要 Cookie 才有资格验）。
+def _check_reply_judging():
+    failed = []
+
+    def check(label, got, expect):
+        mark = "OK " if got == expect else "FAIL"
+        if got != expect:
+            failed.append("%s：得到 %r，期望 %r" % (label, got, expect))
+        print("  [%s] %s → %r" % (mark, label, got))
+
+    # 1) 复刻真实结构：head 里一堆 <script>（含 STYLEID），正文 #messagetext 是真因
+    blob = (
+        "var STYLEID = '1', STATICURL = 'static/image/', IMGDIR = 'static/image/';\n"
+        "var discuz_uid = '12345';\n"
+        "<div id=\"messagetext\" class=\"alert_error\">"
+        "抱歉，您的请求来路不正确或表单验证串不符，无法提交</div>"
+    )
+    kind, detail = p52.classify_reply_blob(blob)
+    check("真因含「请求来路不正确」", kind, "formhash")
+    # 句子从命中的 marker 起算，所以不含「抱歉，您」这个客套前缀 —— 无信息损失，
+    # 关键是「请求来路不正确或表单验证串不符，无法提交」这一整句都在。
+    check(
+        "回执整句露出来",
+        detail,
+        "请求来路不正确或表单验证串不符，无法提交",
+    )
+    if "STYLEID" in detail:
+        failed.append("回执里混进了 head 的 JS 变量：%r" % detail)
+
+    # 2) 只有泛短语「抱歉，您」时归 error，不能冒充 formhash
+    kind, _ = p52.classify_reply_blob(
+        "<em id='returnmessage_x'>抱歉，您的两次发表间隔少于 15 秒</em>"
+    )
+    check("间隔太短归 error", kind, "error")
+
+    # 3) 审核类仍归 pending（别被formhash 判定抢走）
+    kind, _ = p52.classify_reply_blob("您发表的回复需要审核，审核通过后将会显示")
+    check("待审核归 pending", kind, "pending")
+
+    # 4) 成功回执
+    kind, detail = p52.classify_reply_blob(
+        "succeedhandle_fastpost('forum.php?mod=redirect&goto=findpost&pid=998877&ptid=123')"
+    )
+    check("成功回执", kind, "success")
+    check("成功带 pid", detail, "pid=998877 page=?")
+
+    # 5) 基线差分：页面固有文本里的「抱歉，您」不算本次错误
+    base = "<div class='tip'>抱歉，您当前是游客身份</div>"
+    kind, _ = p52.classify_reply_blob(base, baseline=base)
+    check("固有文本不误判", kind, "none")
+
+    # 6) 服务端成功后紧跟一句「请求来路不正确」（极少见，但要保证不被formhash 抢走成功）
+    kind, _ = p52.classify_reply_blob(
+        "抱歉，您的请求来路不正确或表单验证串不符，无法提交\nsucceedhandle_fastpost('x')"
+    )
+    check("成功优先于 formhash", kind, "success")
 
     return failed
 

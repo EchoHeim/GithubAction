@@ -51,6 +51,12 @@
 
     PJ52_REPLY_STRICT   置 0 则回帖失败不影响整体退出码，默认 1（失败即红）
 
+    PJ52_REPLY_FORMHASH_RETRIES
+                        formhash 失效时的重试次数，默认 2。**只有 formhash 类失败
+                        会重试**（服务端在submitcheck 就打回了，内容没发出去，
+                        重试幂等）；内容/权限类拒绝一律不自动重试 —— 那种情况
+                        内容可能已经写进去了，重试等于刷帖。
+
 ⚠️ 回帖是「跑一次发一条」：本机/CI 手动多跑几次就会多发几条。吾爱版规明写
 「禁止复制他人回复等『恶意灌水』行为，违者重罚」，别把它当刷帖脚本用。
 
@@ -66,6 +72,33 @@ CI 上回帖报「回帖被拒（抱歉，您）」，罪魁不是站点、是**
   - 命中多个短语时取**最长**的那条，并把**整句话**带进日志与异常；
   - 判定前先采一次**提交前基线**做差分，页面固有文本不算「本次错误」；
   - 审核类回执从「错误」里挪出来，算「已提交待审核」——那其实是发出去了。
+
+━━━ 回帖判定的坑二（2026-10-07）━━━
+CI 上回帖报「回帖被拒（var STYLEID = '1', STA）」。`var STYLEID` 是 Discuz 提示页
+head 里的 JS 变量，跟报错毫无关系 —— 而服务端其实**已经把真话说清楚了**，
+只是同一份现场快照里的messagetext 字段明明写着：
+
+    抱歉，您的请求来路不正确或表单验证串不符，无法提交
+
+两处都是自己作的：
+
+1. **句子定位抓错了段**（_reply_snippet）：原来靠「marker 往前取20 字符 + 按标签
+   收尾」定位，而collect_reply_blob 会把**所有 <script> 的文本**都拼进 blob
+   （回执就是注入的 <script>）。于是「往前取」很容易落到 head 里那堆变量定义上。
+   改成**只向右读、读到句末标点就停**，并在所有出现位置里取截得最长的那句。
+2. **formhash 类失败没单独归类**（真因）：「请求来路不正确或表单验证串不符」是
+   Discuz `submitcheck()` 抛的，意思是**这次 POST 的 formhash 与会话对不上**，
+   内容压根没发出去。它和「内容/权限被拒」的处理方式**完全相反**：
+     - formhash 类：刷新重取后重试是安全的、幂等的（请求没写进库）；
+     - 内容类：可能已经写进去了，自动重试等于刷帖（见上面的灌水警告）。
+   混在一起时两种策略互相打架。现在 formhash 归 `formhash` 类，
+   自动重试只对它开放（PJ52_REPLY_FORMHASH_RETRIES，默认 2）。
+
+新增取证（下次失败能自证，不用再猜）：
+  - `read_formhash()`：提交前把页面上的 formhash（隐藏域 / JS 变量）读出来打日志，
+    读不到本身就是关键信息；
+  - `dump_reply_network()`：从 CDP performance 日志里捞出真实的回帖请求，
+    落盘 POST body（看 formhash 有没有、值多少）和响应体。
 
 """
 
@@ -93,12 +126,23 @@ CREDIT_URL = os.getenv(
     "PJ52_CREDIT_URL", "https://www.52pojie.cn/home.php?mod=spacecp&ac=credit"
 )
 # 回帖得积分的目标板块，默认『精品软件区』（fid=16）
+# ⚠️ fid 是实测来的，别照抄别处的数字（2026-10-07 用真浏览器逐个验证过）：
+#   fid=16 → 『精品软件区』  fid=5 → 『脱壳破解区』  fid=6 → 『动画发布区』
+#   fid=12/14/33 → 不存在，访问会落到「提示信息」页
 FORUM_URL = os.getenv("PJ52_FORUM_URL", "https://www.52pojie.cn/forum-16-1.html")
 # 回帖内容与开关。回复本身是「每日互动」，跑一次发一条 —— 不想发就把 PJ52_REPLY 设成 0
 
 # ⚠️ 别往短了改：Discuz 有「帖子小于 N 个字符」的最小字数限制（站点侧设置）。
 #    早先默认的「谢谢分享~」只有 6 个字符，很可能正是被这条挡下的（2026-09-28）。
-REPLY_TEXT = os.getenv("PJ52_REPLY_TEXT", "谢谢分享，正好需要这个工具，感谢楼主~")
+#    lodge 2026-10-07 明确要求用这 6 字，所以默认就是它；被拒时把这条调长即可。
+REPLY_TEXT = os.getenv("PJ52_REPLY_TEXT", "谢谢分享~")
+
+# 回几个帖子。同一板块里挑**互不相同**的几个普通帖（见 pick_threads）。
+REPLY_COUNT = int(os.getenv("PJ52_REPLY_COUNT", "2"))
+# 两次回帖之间的间隔（秒）。
+# ⚠️ 别低于 20：Discuz 有「两次发表间隔少于 15 秒」的硬限制，会直接拒掉第二条。
+#    20s 是刚好越过那条线的最小安全值。
+REPLY_INTERVAL = int(os.getenv("PJ52_REPLY_INTERVAL", "20"))
 
 REPLY_ENABLE = os.getenv("PJ52_REPLY", "1") != "0"
 # 回帖失败是否判定整次运行失败。默认失败（宁可红也不要静默），只签到就把它顺手关掉
@@ -199,6 +243,13 @@ REPLY_ERROR_MARKERS = (
     "重复回复",
     "已经回复过",
     "权限不足",
+    # ⚠️ 2026-10-07 补：Discuz `submitcheck()` 校验失败时抛的原文。这条最要紧，
+    #    因为它**不是**「内容/权限/频率」问题，而是「这次 POST 的 formhash 与会话对不上」，
+    #    换成改文案、加长、换帖子都没用（详见 read_formhash / submit_invalid 分类）。
+    "请求来路不正确",
+    "表单验证串不符",
+    "验证字串不符",
+    "表单验证",
 )
 # 「等审核」不是失败 —— 回复已经提交成功，只是要人工过一遍。
 # 从错误表里挪出来单独归类，免得把发出去的回复报成失败。
@@ -207,6 +258,17 @@ REPLY_PENDING_MARKERS = (
     "待审核",
     "审核后",
     "审核通过",
+)
+# ⚠️ formhash 失效必须**单独归类**，不能混进 error：
+#   - 内容/权限类拒绝：换文案、换帖子重试有意义（但回帖有副作用，别自动重试）；
+#   - formhash 类拒绝：**内容根本没发出去**，服务端在submitcheck() 就打回了，
+#     所以刷新页面重取 formhash 后重试是安全的、幂等的。
+# 混在一起就会导致两种错误策略互相打架（见 classify_reply_blob）。
+REPLY_FORMHASH_MARKERS = (
+    "请求来路不正确",
+    "表单验证串不符",
+    "验证字串不符",
+    "表单验证",
 )
 # 回复验证码（Discuz seccode）：出现才填 —— 元素级截图喂 ddddocr
 POST_CAPTCHA_INPUT_XPATHS = (
@@ -755,11 +817,17 @@ def read_credits(driver, url=""):
     return value
 
 
-def pick_thread(driver, forum_url, secrets=()):
-    """在板块列表第一页里随机挑一个普通帖，返回 (标题, 链接)。
+def pick_threads(driver, forum_url, count, secrets=()):
+    """在板块列表第一页里随机挑 `count` 个**互不相同**的普通帖，返回 [(标题, 链接)]。
 
     只取 `normalthread_*` 里的帖子 —— 置顶/公告是 `stickthread_*`，回那种帖没意义还容易踩版规。
+
+    ⚠️ 必须去重：同一天跑两次、或板块只有一两个帖时，`random.choice` 很可能挑到同一个，
+    于是「回 2 个帖子」实际变成「对同一个帖子回两次」—— Discuz 会拦（重复回复），
+    更糟的是这就成了刷帖。候选不够时直接报错并说明，绝不拿同一个凑数。
     """
+    if count <= 0:
+        return []
     if not pass_waf(driver, forum_url):
         raise RuntimeError("板块列表：WAF 图片验证码未通过（%s）" % forum_url)
     wait_document_ready(driver)
@@ -785,14 +853,20 @@ def pick_thread(driver, forum_url, secrets=()):
         raise RuntimeError("板块列表未找到普通帖：%s" % driver.current_url)
 
     candidates = []
+    seen = set()
     for link in links:
         try:
             href = link.get_attribute("href") or ""
             title = " ".join((link.text or "").split())
         except WebDriverException:
             continue
-        if re.search(r"/thread-\d+-\d+-\d+\.html", href) and title:
-            candidates.append((title, href))
+        # 按 tid 去重：同一帖在列表里可能出现多次（推荐位/多重标记）
+        match = re.search(r"/thread-(\d+)-\d+-\d+\.html", href)
+        if not match or not title or match.group(1) in seen:
+            continue
+        seen.add(match.group(1))
+        candidates.append((title, href))
+
     if not candidates:
         dump_debug(
             driver,
@@ -802,9 +876,151 @@ def pick_thread(driver, forum_url, secrets=()):
         )
         raise RuntimeError("板块列表里没有可用的帖子链接")
 
-    title, href = random.choice(candidates)
-    print("===> 随机挑中 %d 个帖子中的: %r (%s)" % (len(candidates), title[:40], href))
-    return title, href
+    print("===> 板块里可用普通帖 %d 个，需要 %d 个" % (len(candidates), count))
+    if len(candidates) < count:
+        # 不降级成「重复回同一个」—— 那等于刷帖，直接把情况说清楚
+        dump_debug(
+            driver,
+            "forum_too_few",
+            notes=[
+                "板块里只有 %d 个可用普通帖，不够回 %d 个" % (len(candidates), count),
+                "可选：换一个帖子更多的板块（PJ52_FORUM_URL），或把 PJ52_REPLY_COUNT 调成 1",
+            ],
+            secrets=secrets,
+        )
+        raise RuntimeError(
+            "板块里只有 %d 个可用帖子，不够回 %d 个（不会重复回同一个帖）"
+            % (len(candidates), count)
+        )
+
+    picked = random.sample(candidates, count)
+    print(
+        "===> 随机挑中 %d/%d 个帖子: %s"
+        % (
+            len(picked),
+            len(candidates),
+            " | ".join("%r" % title[:26] for title, _ in picked),
+        )
+    )
+    return picked
+
+
+def pick_thread(driver, forum_url, secrets=()):
+    """单数版本，保留给只要一条的场景（内部走 pick_threads）。"""
+    return pick_threads(driver, forum_url, 1, secrets)[0]
+
+
+def read_formhash(driver):
+    """读页面里 Discuz 的 formhash（隐藏域 / JS 变量两种来源）。
+
+    formhash 是 `submitcheck()` 的闸门：服务端拿 POST 里的 `formhash`
+    跟 `FORMHASH = md5(uid + TIMESTAMP + authkey + …)` 现算的值比，
+    不一致就抛「请求来路不正确或表单验证串不符」。
+
+    ⚠️ 2026-10-07：CI 上回帖就是被这个挡回来的，服务端原话
+    「抱歉，您的请求来路不正确或表单验证串不符，无法提交」。
+    与其猜，不如把页面上的值读出来打日志 —— 读不到本身就是关键信息
+    （说明主题没渲染隐藏域，提交必然失败）。
+
+    返回 (来源, 值)；取不到时返回 ("", "")。
+    """
+    try:
+        source, value = driver.execute_script("""
+            var el = document.querySelector("input[name=formhash]");
+            if (el && el.value) return ['input', el.value];
+            // 部分主题只在 JS 变量里给（fastpost 表单靠它拼 POST）
+            if (typeof formhash !== 'undefined' && formhash) return ['js', String(formhash)];
+            return ['', ''];
+        """)
+    except WebDriverException:
+        return "", ""
+    return source or "", value or ""
+
+
+def _drain_network_log(driver, keyword):
+    """从 CDP performance 日志里挑出 URL 含 keyword 的请求/响应。
+
+    ⚠️ 回帖判定必须看**真实 HTTP 响应**：Discuz 把回执作为 `<script>` 注入，
+    成功失败都可能不落到界面上（见文件头 Step 4.5/4.7）。
+    只在失败现场 dump 时调用 —— 日志量大，且响应体可能含敏感内容。
+    """
+    try:
+        entries = driver.get_log("performance")
+    except (WebDriverException, KeyError, ValueError):
+        return []
+
+    found = []
+    request_ids = {}
+    for entry in entries or []:
+        try:
+            message = json.loads(entry["message"])["message"]
+        except (ValueError, KeyError):
+            continue
+        method = message.get("method", "")
+        params = message.get("params", {})
+        if method == "Network.requestWillBeSent":
+            url = params.get("request", {}).get("url", "")
+            if keyword in url:
+                rid = params["requestId"]
+                request_ids[rid] = url
+                found.append(
+                    {
+                        "requestId": rid,
+                        "url": url,
+                        "status": None,
+                        "postData": params.get("request", {}).get("postData", ""),
+                        "body": "",
+                    }
+                )
+        elif method == "Network.responseReceived":
+            for item in found:
+                if item["requestId"] == params.get("requestId"):
+                    item["status"] = params.get("response", {}).get("status")
+
+    for item in found:
+        item["body"] = _fetch_response_body(driver, item["requestId"])
+        item.pop("requestId", None)
+    return found
+
+
+def _fetch_response_body(driver, request_id):
+    try:
+        return (
+            driver.execute_cdp_cmd("Network.getResponseBody", {"requestId": request_id})[
+                "body"
+            ]
+            or ""
+        )[:1500]
+    except WebDriverException:
+        return ""
+
+
+def dump_reply_network(driver, tag="reply_network"):
+    """把回帖提交的真实 HTTP 请求/响应落盘。
+
+    这是定位 formhash 问题唯一可靠的手段：界面上看不出区别，
+    但 POST body 里有没有 `formhash`、formhash 的值、服务端回了什么，全在响应体里。
+    """
+    items = _drain_network_log(driver, "fastpost") or _drain_network_log(
+        driver, "action=reply"
+    )
+    lines = []
+    for item in items[-3:]:
+        post = " ".join((item.get("postData") or "").split())
+        has_hash = "formhash=" in post
+        lines.append("url: %s" % item.get("url"))
+        lines.append("status: %s" % item.get("status"))
+        lines.append("postData 有 formhash: %s" % has_hash)
+        lines.append("postData: %s" % post[:600])
+        lines.append("body: %s" % " ".join((item.get("body") or "").split())[:600])
+        lines.append("---")
+    _safe_write(
+        os.path.join(DEBUG_DIR, "%s_%s.txt" % (tag, time.strftime("%H%M%S"))),
+        "\n".join(lines) or "(performance 日志里没找到回帖请求)",
+    )
+    print("===> 回帖网络日志已留存 %s.txt" % tag)
+    for line in lines[:6]:
+        print(line)
 
 
 def fill_post_captcha(driver):
@@ -868,19 +1084,40 @@ def _reply_snippet(blob, marker, back=20, width=100):
     """取 marker 所在处的**整句话**。
 
     只报 marker 本身等于没报：泛短语会把具体原因砍掉（见 classify_reply_blob 第 3 条）。
+
+    ⚠️ 2026-10-07 踩过：**不能靠「前后切一刀 + 按标签收尾」定位句子**。
+    Discuz 的错误提示页长这样：
+
+        <head><script>var STYLEID = '1', STATICURL = 'static/image/'; …</script></head>
+        …
+        <div id="messagetext">抱歉，您的请求来路不正确或表单验证串不符，无法提交</div>
+
+    采集时把**所有 <script> 的文本**都拼进了 blob（回执就是注入的 <script>，
+    见 collect_reply_blob）。于是「marker 往前取一点」很容易落到 head 里那堆
+    JS 变量定义上——现场日志报出来的是 `var STYLEID = '1', STA`，跟报错毫无关系，
+    真因「请求来路不正确」一个字都没露出来。
+
+    现在的做法：**只向右读，读到句末标点就停**（服务端提示都是完整一句），
+    左侧不带任何上下文。marker 可能同时出现在 head 的 JS 和正文里，
+    所以把**所有出现位置**都试一遍，取能截出最长完整句子的那个。
     """
-    index = blob.find(marker)
-    if index < 0:
-        return marker
-    # 向前带一点上下文找句首，再按标签/换行截断 —— Discuz 的提示是纯文本，
-    # 后面常跟 `<a>`「如果您的浏览器没有自动跳转，请点击此链接」这类尾巴。
-    tail = blob[max(0, index - back) : index + width]
-    tail = re.split(r"[<\n\r]", tail)[-1]
-    return " ".join(tail.split())[:width] or marker
+    best = ""
+    start = 0
+    while True:
+        index = blob.find(marker, start)
+        if index < 0:
+            break
+        start = index + len(marker)
+        # Discuz 的提示后面常跟 `<a>`「点击此链接」这类尾巴，按标点/标签收尾
+        tail = re.split(r"[。！？；;\n\r]|<", blob[index : index + width])[0]
+        tail = " ".join(tail.split())[:width]
+        if len(tail) > len(best):
+            best = tail
+    return best or marker
 
 
 def classify_reply_blob(blob, baseline=""):
-    """纯函数：判定回帖结果 → (归类, 说明)；归类 ∈ success / error / pending / none。
+    """纯函数：判定回帖结果 → (归类, 说明)；归类 ∈ success / error / pending / formhash / none。
 
     ⚠️ 三个坑（前两个是 2026-09-27 用 CDP 抓网络日志、第三个是 2026-09-28 在 CI 上踩的）：
       1. Discuz 的响应是**注入到 `<head>` 的一段 `<script>`**，不是写进 `#fastpostreturn`；
@@ -909,6 +1146,12 @@ def classify_reply_blob(blob, baseline=""):
     if pending:
         return "pending", _reply_snippet(blob, max(pending, key=len))
 
+    # formhash 失效要**先于**泛错误短语判定：
+    # 「请求来路不正确」这句话本身就以「抱歉，您」开头，不先摘出来就被兜底吃掉。
+    formhash_hits = fresh(REPLY_FORMHASH_MARKERS)
+    if formhash_hits:
+        return "formhash", _reply_snippet(blob, max(formhash_hits, key=len))
+
     hits = fresh(REPLY_ERROR_MARKERS)
     if hits:
         return "error", _reply_snippet(blob, max(hits, key=len))
@@ -916,7 +1159,7 @@ def classify_reply_blob(blob, baseline=""):
 
 
 def read_reply_result(driver, baseline=""):
-    """读回帖结果 → (归类, 说明)；归类 ∈ success / error / pending / none。
+    """读回帖结果 → (归类, 说明)；归类 ∈ success / error / pending / formhash / none。
 
     baseline 传「点击提交前」采集的快照，用于剔除页面固有文本（传空串则不做差分）。
     """
@@ -940,7 +1183,10 @@ def read_last_post_text(driver):
         return ""
 
 
-def reply_thread(driver, url, text, secrets=()):
+REPLY_FORMHASH_RETRIES = int(os.getenv("PJ52_REPLY_FORMHASH_RETRIES", "2"))
+
+
+def reply_thread(driver, url, text, secrets=(), _attempt=0):
     """打开帖子 → 快捷回复框填内容 → 提交 → 按服务端回执确认。
 
     校验不看界面：Discuz 把回执作为 `<script>` 注入 `<head>`，本主题没定义
@@ -949,6 +1195,10 @@ def reply_thread(driver, url, text, secrets=()):
     提交前先采一次页面文本基线（`collect_reply_blob`），判定只认**本次新引入**的
     短语，并把服务端原话整句带进日志与异常 —— 见 classify_reply_blob。
 
+    ⚠️ formhash 失效（`submit_invalid`）会自动刷新重取后重试：服务端在
+    `submitcheck()` 那一关就把请求打回了，**内容根本没发出去**，所以这次重试
+    是幂等的、不会灌水（2026-10-07 加）。别的拒绝一律不自动重试 —— 那种情况下
+    请求可能已经写进去了，重试等于刷屏（文件头Step 4.7 的教训）。
     """
     if not pass_waf(driver, url):
         raise RuntimeError("帖子页：WAF 图片验证码未通过（%s）" % url)
@@ -970,6 +1220,14 @@ def reply_thread(driver, url, text, secrets=()):
     box.clear()
     box.send_keys(text)
     print("===> 已在快捷回复框填入: %r" % text)
+
+    # 提交前自检 formhash：读不到就等于提交必然被submitcheck 打回，
+    # 与其白等30s 拿一句「表单验证串不符」，不如当场把这一环的信息说清楚。
+    source, formhash = read_formhash(driver)
+    print("===> formhash 来源=%s 值=%s" % (source or "(读不到)", formhash or "(空)"))
+    if not formhash:
+        print("[WARN] 页面上读不到 formhash —— 这次提交大概率会被服务端以"
+              "「表单验证串不符」拒掉；日志里的 reply_network 会显示 POST 里有没有它")
 
     submit, _ = wait_visible(driver, REPLY_SUBMIT_XPATHS, 10, "发表回复按钮")
     if submit is None:
@@ -1003,8 +1261,33 @@ def reply_thread(driver, url, text, secrets=()):
             # 审核 ≠ 失败：回复已经提交出去了，只是要人工过一遍
             print("===> 回帖已提交，等待审核（%s）" % detail)
             return "已提交待审核（%s）" % detail
+        if kind == "formhash":
+            # 请求没发出去 → 重取 formhash 重试是安全的
+            if _attempt < REPLY_FORMHASH_RETRIES:
+                print("===> formhash 失效（第 %d 次），重新加载帖子页重试: %s"
+                      % (_attempt + 1, detail))
+                return reply_thread(
+                    driver, url, text, secrets, _attempt=_attempt + 1
+                )
+            dump_reply_network(driver, "reply_formhash_exhausted")
+            dump_debug(
+                driver,
+                "reply_formhash_invalid",
+                notes=[
+                    "服务端 submitcheck() 校验失败（formhash 与会话对不上）",
+                    "服务端回执: %s" % detail,
+                    "页面上读到的 formhash: 来源=%s 值=%s" % (source or "(读不到)", formhash or "(空)"),
+                    "常见原因：① 页面开太久（Discuz 的 TIMESTAMP 变了）"
+                    "② 注入的 Cookie 会话与页面渲染时不一致 ③ 主题没渲染 formhash 隐藏域",
+                    "详见 reply_network_*.txt 里的 POST body",
+                ],
+                secrets=secrets,
+            )
+            raise RuntimeError("回帖被服务端拒绝：表单验证串不符（%s）" % detail)
 
         if kind == "error":
+            # 内容/权限类拒绝：**不自动重试** —— 可能已经写进去了，重试等于刷帖
+            dump_reply_network(driver, "reply_rejected")
             dump_debug(
                 driver,
                 "reply_rejected",
@@ -1033,6 +1316,7 @@ def reply_thread(driver, url, text, secrets=()):
 
     # 没判定出来时，把页面文本尾部一并留在现场 —— 否则 artifact 里只有一句「回执片段: (空)」
     tail = " ".join(collect_reply_blob(driver).split())[-300:]
+    dump_reply_network(driver, "reply_unconfirmed")
     dump_debug(
         driver,
         "reply_unconfirmed",
@@ -1044,6 +1328,41 @@ def reply_thread(driver, url, text, secrets=()):
         secrets=secrets,
     )
     raise RuntimeError("点击发表回复后状态未明（%s）" % (detail[:120] or "空"))
+
+
+def reply_many_threads(driver, forum_url, text, secrets=(), count=1, interval=20):
+    """依次回 `count` 个帖子，每次之间等 `interval` 秒。返回 [(标题, 结果字符串)]。
+
+    ⚠️ 间隔是硬要求，不是「礼节」：Discuz 对连续发表有「两次发表间隔少于 15 秒」的
+    限制，第二条会直接被拒（回执「抱歉，您的两次发表间隔少于 15 秒」）。
+    20s 是刚越过那条线的最小值。
+
+    失败处理刻意做成「**不因单条失败而中断后续**」：
+    第 1 条失败（比如 formhash 失效）不代表第 2 条也会失败，而漏掉一条就是少拿一天的互动分。
+    但每条失败都完整记录，最后由调用方决定要不要按 REPLY_STRICT 让整体变红。
+    """
+    targets = pick_threads(driver, forum_url, count, secrets)
+    results = []
+
+    for index, (title, href) in enumerate(targets):
+        if index > 0 and interval > 0:
+            print(
+                "===> 等 %ds 再回第 %d 个帖子（避开「两次发表间隔少于 15 秒」）"
+                % (interval, index + 1)
+            )
+            time.sleep(interval)
+
+        print("===> 回帖 %d/%d：%r" % (index + 1, len(targets), title[:40]))
+        try:
+            outcome = reply_thread(driver, href, text, secrets)
+            results.append((title, outcome))
+        except Exception as err:
+            # 只截断展示长度，完整现场已经由reply_thread 自己 dump 进52pojie-debug/
+            detail = "失败：%s" % str(err)[:120]
+            print("===> 回帖 %d/%d 失败: %s" % (index + 1, len(targets), err))
+            results.append((title, detail))
+
+    return results
 
 
 def notify(bot_id, status, note="", points="", reply="", credits=""):
@@ -1140,18 +1459,35 @@ def pojie52(cookie="", bot_id=""):
         print("===> 签到结果: %s" % status)
 
         if REPLY_ENABLE:
-            title, href = pick_thread(driver, FORUM_URL, secrets)
             try:
-                reply_status = "%s（%s）" % (
-                    reply_thread(driver, href, REPLY_TEXT, secrets),
-                    title[:24],
+                # 一次挑中N 个互不相同的帖子，逐个回，每两条之间等 REPLY_INTERVAL 秒
+                results = reply_many_threads(
+                    driver,
+                    FORUM_URL,
+                    REPLY_TEXT,
+                    secrets,
+                    count=REPLY_COUNT,
+                    interval=REPLY_INTERVAL,
                 )
             except Exception as err:
+                # 挑帖阶段就失败（板块没帖/WAF没过）—— 一个都没发出去
                 reply_status = "失败：%s" % str(err)[:120]
                 print("===> 回帖失败: %s" % err)
                 if REPLY_STRICT:
                     raise
-            print("===> 回帖结果: %s" % reply_status)
+                results = []
+
+            if results:
+                ok = sum(1 for _, r in results if not r.startswith("失败"))
+                reply_status = "%d/%d 成功｜%s" % (
+                    ok,
+                    len(results),
+                    "；".join("%s → %s" % (title[:16], r[:40]) for title, r in results),
+                )
+                print("===> 回帖结果: %s" % reply_status)
+                # 有失败但也发出去了 → 按STRICT 的语义决定要不要让整体变红
+                if ok < len(results) and REPLY_STRICT:
+                    raise RuntimeError("回帖部分失败：%s" % reply_status)
         else:
             print("===> PJ52_REPLY=0，跳过回帖")
 
