@@ -23,6 +23,15 @@ v2ex.com/mission/daily 会被踢回登录页 —— 所以 SIGNIN_URL 默认指�
   同一天重复跑不会误报失败。每一步都先等 URL 落地再查元素，任何异常都 dump 现场后抛错，
   绝不再出现「打了日志就算成功」。
 
+  4. 站点故障容错 —— V2EX 偶尔返回 Cloudflare 的 HTTP ERROR 522/502（源站接不上），
+     此时 URL 依旧是 https://v2ex.com/，`wait_url` 会「秒通过」，但 DOM 里既没有登出
+     链接也没有任何正文。2026-10-11/12 连着两天就是这样：登录其实成功了，却因为首页
+     这一个请求超时，被判成「不是登录态」直接 fail。所以现在：
+       · 取页一律过 open_ready()，认错误页并退避重试；
+       · 首页降级为**可选**探测，打不开就直连 /mission/daily —— 登录成功的那一刻
+         session cookie 已经落进 driver 了，任务页不经过首页也能领；
+       · 「是否已登录」的最终判据挪到任务页（被踢回 /signin 才算没登录）。
+
 用法：
     python v2ex.py <用户名> <密码> [飞书机器人 webhook]
 
@@ -32,8 +41,9 @@ v2ex.com/mission/daily 会被踢回登录页 —— 所以 SIGNIN_URL 默认指�
     V2EX_SIGNIN_URL     登录页，默认 https://v2ex.com/signin（必须与签到页同域）
     V2EX_HOME_URL       首页，默认 https://v2ex.com/
     V2EX_MISSION_URL    签到页，默认 https://v2ex.com/mission/daily
-    V2EX_MAX_ATTEMPTS   整页重来的次数，默认 5
-    V2EX_VOTE_ROUNDS    单次登录内换图找一致结果的上限，默认 12
+V2EX_MAX_ATTEMPTS   整页重来的次数，默认 5
+V2EX_VOTE_ROUNDS    单次登录内换图找一致结果的上限，默认 12
+V2EX_PAGE_TRIES     取同一个页面的最大次数（撞上错误页时退避重试），默认 3
 
 失败现场都会写进 v2ex-debug/，CI 里由 workflow 收集成 artifact——出问题不用再靠猜。
 """
@@ -51,6 +61,9 @@ HOME_URL = os.getenv("V2EX_HOME_URL", "https://v2ex.com/")
 MISSION_URL = os.getenv("V2EX_MISSION_URL", "https://v2ex.com/mission/daily")
 MAX_ATTEMPTS = int(os.getenv("V2EX_MAX_ATTEMPTS", "5"))
 VOTE_ROUNDS = int(os.getenv("V2EX_VOTE_ROUNDS", "12"))
+PAGE_TRIES = int(os.getenv("V2EX_PAGE_TRIES", "3"))
+# 错误页重试的退避秒数，比 PAGE_TRIES 少一个（最后一次不用等）
+PAGE_BACKOFF = (5, 15)
 
 # 用来判断「导航是否真的落到首页了」。必须带上 "//"，否则 `v2ex.com` 会
 # 在 edge.v2ex.com 的 URL 里也命中，等于没判断。
@@ -148,11 +161,94 @@ def dump_debug(driver, tag, notes=(), secrets=()):
     print(text.strip())
 
 
+# Cloudflare / 网关层错误页的特征串。命中任意一条就说明这页不是 V2EX 的正文，
+# 别拿它去判断登录态 —— 上面既没有登出链接，也没有报错文案。
+# 注意都用小写：比对时统一转小写，大小写变体不必重复列。
+ERROR_PAGE_HINTS = (
+    "http error 5",          # HTTP ERROR 522 / 502 / 504 ...
+    "this page isn't working",
+    "is currently unable to handle this request",   # nginx
+    "502 bad gateway",
+    "503 service",
+    "origin server",
+    "error 1020",
+    "attention required",    # Cloudflare 拦截页
+)
+
+
+def error_hint(driver=None, source=None):
+    """判断当前页是不是站点/网关错误页，返回命中的特征描述；正常页返回 ""。
+
+    ⚠️ 光看 URL 是不够的：2026-10-11 V2EX 首页返回 HTTP ERROR 522 时，
+    `driver.current_url` 就是 https://v2ex.com/，`wait_url` 会立刻返回 True。
+    所以要两个维度一起看 —— 特征文案 + 页面长度（错误页通常短得离谱）。
+    """
+    if source is None:
+        if driver is None:
+            raise ValueError("error_hint 需要 driver 或 source 之一")
+        try:
+            source = driver.page_source or ""
+        except WebDriverException as err:
+            return "page_source 读取失败: %s" % err
+
+    low = source.lower()
+    for hint in ERROR_PAGE_HINTS:
+        if hint in low:
+            return "命中错误页特征: %r" % hint
+    # 正常首页源码几十 KB；错误页/空白页往往不到 1KB。
+    # 白名单用于防误伤：只要还能看到 V2EX 自己的功能标记，就认它是真页面（哪怕短）。
+    real_page_marks = ("/signout", "/signin", "captcha", "v2ex")
+    if len(source) < 1024 and not any(mark in low for mark in real_page_marks):
+        return "页面过短(%d 字节)，疑似错误页/空白页" % len(source)
+    return ""
+
+
+def open_ready(driver, url, needle, tries=PAGE_TRIES, timeout=20):
+    """打开页面并确认它**内容正常**，返回错误描述；正常到达返回 ""。
+
+    两种「不对」要分开处理，别混为一谈：
+      · URL 没到位（多半是被重定向走了，比如没登录时 /mission/daily → /signin）——
+        这是确定性结果，重试也不会变，直接返回让调用方决策；
+      · URL 对了但页面是错误页（Cloudflare 522 之类）—— 站点抽风，退避重试。
+
+    站点暂时性抽风撑几秒就好了，重试一次的成本远低于整次签到失败 ——
+    何况 job 还有 12 分钟超时兜着。
+    """
+    hint = ""
+    for no in range(1, tries + 1):
+        try:
+            driver.get(url)
+        except WebDriverException as err:
+            print("[WARN] 打开 %s 失败: %s" % (url, err))
+
+        if not wait_url(driver, needle, timeout):
+            try:
+                current = driver.current_url
+            except WebDriverException:
+                current = "(读不到)"
+            return "打开 %s 后 URL 未命中 %r，当前 %s" % (url, needle, current)
+
+        time.sleep(1)
+        hint = error_hint(driver)
+        if not hint:
+            return ""
+        print("===> 第 %d/%d 次打开 %s 拿到错误页: %s" % (no, tries, url, hint))
+        if no < tries:
+            time.sleep(PAGE_BACKOFF[min(no - 1, len(PAGE_BACKOFF) - 1)])
+    return hint
+
+
 def is_logged_in(driver):
-    """判断是否已进入登录态：出现登出链接，或已离开登录页且验证码框消失。"""
+    """判断是否已进入登录态：出现登出链接，或已离开登录页且验证码框消失。
+
+    ⚠️ 错误页必须排除在外：它既不含 /signout 也没有验证码框，按老逻辑会被判成
+    「已离开登录页且验证码消失」= 已登录，把一个 522 错误页当成登录成功。
+    """
     try:
         if "/signout" in driver.page_source:
             return True
+        if error_hint(driver):
+            return False
         if "/signin" not in driver.current_url:
             return find_visible(driver, CAPTCHA_INPUT_XPATHS)[0] is None
         return False
@@ -208,7 +304,16 @@ def login_once(driver, username, password, attempt=1):
     submit.click()
     time.sleep(3)
 
-    if not is_logged_in(driver):
+    # 提交后落地页撞上 Cloudflare 522 时，URL 是对的但 DOM 是错误页 —— 那是站点的锅，
+    # 不是账号的锅。重取一次再判，别白白吃掉一次登录重试机会。
+    hint = error_hint(driver)
+    if hint:
+        print("===> 登录后落地页是错误页（%s），重取一次再判登录态" % hint)
+        hint = open_ready(driver, HOME_URL, HOME_HOST, timeout=15)
+        if hint:
+            print("===> 首页仍打不开（%s），登录态待定，按失败处理" % hint)
+
+    if hint or not is_logged_in(driver):
         dump_debug(
             driver,
             "a%d_login_failed" % attempt,
@@ -293,6 +398,24 @@ def claim_amount(value):
     return match.group(1) if match else ""
 
 
+# 任务页上表达「今天已经领过了」的文案。中英文都要列 —— CI 跑海外 IP 拿到英文界面，
+# 只认中文会把「今日已领取」误判成「页面结构变了」。
+CLAIMED_HINTS = (
+    "成功领取",
+    "已领取",
+    "已连续登录",
+    "consecutive day",
+    "received your daily",
+    "come back tomorrow",
+)
+
+
+def has_claimed_text(driver):
+    """任务页是否已经表达了「今日已领取」。"""
+    low = (driver.page_source or "").lower()
+    return any(hint.lower() in low for hint in CLAIMED_HINTS)
+
+
 def notify(bot_id, status, balance, claimed="", note=""):
     """推一张飞书卡片。
 
@@ -313,19 +436,29 @@ def notify(bot_id, status, balance, claimed="", note=""):
 
 
 def claim_daily(driver, username="", password=""):
-    """签到领奖：回首页 → 点侧栏领奖入口 → 任务页点「领取 X 铜币」→ 校验结果。
+    """签到领奖：首页探活（可选）→ 进任务页点「领取 X 铜币」→ 校验结果。
 
     返回 (状态, 本次领取数额)，两者都会进飞书卡片。
 
     每一步都先等 URL 落地再查元素：page_load_strategy="none" 下 get() 立即返回，
     不等就查会查到上一个页面的 DOM（踩过：在上一个页面上点了个无关按钮还报成功）。
-    """
-    # 1) 回首页：既是领奖入口所在，也最直观地反映登录态
-    driver.get(HOME_URL)
-    wait_url(driver, HOME_HOST, 20)
-    time.sleep(1)
 
-    if "/signout" not in (driver.page_source or ""):
+    ⚠️ 首页是**可选**的一步。2026-10-11/12 V2EX 首页连着两天返回 HTTP ERROR 522，
+    旧流程却拿它当登录态的唯一判据，于是「站点抽风」被翻译成「签到失败」。
+    现在首页打不开只降级（跳过入口探测、直连 /mission/daily）—— 登录成功的那一刻
+    session cookie 就已经落进 driver 了，任务页并不依赖首页。
+    """
+    entry = None
+    # 1) 首页：探活 + 找「今日的登录奖励」入口
+    hint = open_ready(driver, HOME_URL, HOME_HOST)
+    if hint:
+        # 站点抽风不是脚本的错，更不是「没登录」—— 降级到直连任务页继续。
+        print(
+            "===> 首页连试 %d 次打不开（%s），跳过首页探测，直连任务页"
+            % (PAGE_TRIES, hint)
+        )
+    elif "/signout" not in (driver.page_source or ""):
+        # 首页打得开却没登出链接，这才是真的没登录
         dump_debug(
             driver,
             "claim_home_not_logged_in",
@@ -333,31 +466,34 @@ def claim_daily(driver, username="", password=""):
             secrets=(username, password),
         )
         raise RuntimeError("首页不是登录态：url=%s" % driver.current_url)
-
-    # 2) 首页的领奖入口只在「今天还没领」时出现，领完即消失 —— 拿它当领取状态判据
-    entry, _ = wait_visible(driver, CLAIM_ENTRY_XPATHS, 15, "首页领奖入口")
-    if entry is None:
-        # 登录态刚确认过，所以「没有入口」= 今日已领取，不是故障。
+    else:
+        # 领奖入口只在「今天还没领」时出现，领完即消失 —— 拿它当领取状态判据。
+        # 登录态刚确认过，所以「没有入口」= 今日已领取，不是故障；
         # 但仍留一份现场：万一是首页结构变了导致选择器失效，artifact 里能看出来。
-        dump_debug(
-            driver,
-            "claim_entry_absent",
-            notes=[
-                "已确认登录态，但首页没有领奖入口，按「今日已领取」处理。"
-                "若这是当天首次运行，请查本现场确认是否页面结构变了"
-            ],
-            secrets=(username, password),
-        )
-        print("===> 首页无领奖入口，判定「今日已领取」，跳过")
-        return "今日已领取（跳过）", ""
+        entry, _ = wait_visible(driver, CLAIM_ENTRY_XPATHS, 15, "首页领奖入口")
+        if entry is None:
+            dump_debug(
+                driver,
+                "claim_entry_absent",
+                notes=[
+                    "已确认登录态，但首页没有领奖入口，按「今日已领取」处理。"
+                    "若这是当天首次运行，请查本现场确认是否页面结构变了"
+                ],
+                secrets=(username, password),
+            )
+            print("===> 首页无领奖入口，判定「今日已领取」，跳过")
+            return "今日已领取（跳过）", ""
 
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", entry)
-    entry.click()
-    print("===> 已点击首页的「领取今日的登录奖励」入口")
-    wait_url(driver, "/mission/daily", 20)
-    time.sleep(1)
+    # 2) 进任务页
+    if entry is not None:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", entry)
+        entry.click()
+        print("===> 已点击首页的「领取今日的登录奖励」入口")
+        wait_url(driver, "/mission/daily", 20)
+        time.sleep(1)
 
     if "/signin" in (driver.current_url or ""):
+        # 走到这一步说明 session 真没生效（首页那条路没走到），别再往下点
         dump_debug(
             driver,
             "claim_redirected_to_signin",
@@ -366,21 +502,23 @@ def claim_daily(driver, username="", password=""):
         )
         raise RuntimeError("任务页被重定向到登录页：url=%s" % driver.current_url)
 
-    if "/mission/daily" not in (driver.current_url or ""):
+    if "/mission/daily" not in (driver.current_url or "") or error_hint(driver):
         # 点击入口没带过去就直连任务页再试一次；还不行才是真异常。
         # 但绝不在没确认落在任务页时就去别处找按钮 —— 上一版就是拿宽选择器在错误页面上乱点。
-        print("===> 点击入口后未落到任务页，改为直连 %s" % MISSION_URL)
-        driver.get(MISSION_URL)
-        wait_url(driver, "/mission/daily", 20)
-        time.sleep(1)
-
-        if "/signin" in (driver.current_url or "") or "/mission/daily" not in (
-            driver.current_url or ""
+        if entry is not None:
+            print("===> 点击入口后未落到任务页，改为直连 %s" % MISSION_URL)
+        hint = open_ready(driver, MISSION_URL, "/mission/daily")
+        if (
+            hint
+            or "/signin" in (driver.current_url or "")
+            or "/mission/daily" not in (driver.current_url or "")
         ):
             dump_debug(
                 driver,
                 "claim_not_on_mission_page",
-                notes=["点击入口与直连都未能进入任务页"],
+                notes=[
+                    hint and "任务页打开失败: %s" % hint or "点击入口与直连都未能进入任务页"
+                ],
                 secrets=(username, password),
             )
             raise RuntimeError("未能进入任务页：url=%s" % driver.current_url)
@@ -388,6 +526,11 @@ def claim_daily(driver, username="", password=""):
     # 3) 点「领取 X 铜币」
     button = find_claim_button(driver, 15)
     if button is None:
+        # 走到这里有两种可能：今天早领过了，或者页面结构又变了。
+        # 页面自己说「领过了」才算已领取 —— 空口无凭时不猜，照样报错留现场。
+        if has_claimed_text(driver):
+            print("===> 任务页显示今日已领取，跳过")
+            return "今日已领取（跳过）", ""
         dump_debug(
             driver,
             "claim_no_button",
