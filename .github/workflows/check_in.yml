@@ -96,9 +96,25 @@ jobs:
       # 而**登录页有人机验证（Cloudflare Turnstile），自动化过不去** —— 所以凭据用登录态
       # Cookie（PJ52_COOKIE），跳过登录页。用户名/密码作为兜底保留，但脚本会快失败并提示。
       # Cookie 失效时（Discuz 会话约一个月）去浏览器重新登录后再抄一次。
+      # 已回帖记录：52pojie 判「刷帖」的判据是**同一篇帖子下出现两条我的回复**，
+      # 而板块第一页就几十个帖子，隔天随机挑 2 个很容易再挑到昨天回过的那篇。
+      # runner 每次都是新机器，所以这份黑名单必须靠 cache 跨运行存下来
+      # （脚本侧见 Selenium/CheckIN/52pojie.py 的 load_reply_history）。
+      # key 带 run_id → 每次都存一份新的；restore-keys 兜住上一份。
+      - name: Restore 52pojie reply history
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
+        uses: actions/cache@v4
+        with:
+          path: 52pojie_reply_history.json
+          key: pj52-reply-history-${{ github.run_id }}
+          restore-keys: |
+            pj52-reply-history-
+
       - name: Check in 52pojie
         if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
-        timeout-minutes: 10
+        # 10 → 15：PJ52_REPLY_INTERVAL 默认 200s（2026-10-12 从 20s 提上来），
+        # 回 2 条光等间隔就 3 分多钟，加上过 WAF 和逐个开帖子，10 分钟不够余量。
+        timeout-minutes: 15
         # 只用 Cookie 登录（密码登录已移除：登录页是 Cloudflare Turnstile，本机线路到不了它）。
         # 因此不需要 xvfb/有头模式，无头更稳。
         env:
@@ -132,6 +148,7 @@ jobs:
           path: |
             52pojie-debug/
             juejin-debug/
+            52pojie_reply_history.json
           if-no-files-found: ignore
           retention-days: 7
 

@@ -180,6 +180,7 @@ def run_offline_checks():
 
     failed += _check_reply_judging()
     failed += _check_pick_threads()
+    failed += _check_reply_history()
 
     return failed
 
@@ -263,10 +264,113 @@ def _check_pick_threads():
         except Exception as err:
             failed.append("count=0 不该抛错: %s" % err)
             print("  [FAIL] count=0 抛错: %s" % err)
+
+        # ── 跨运行去重（2026-10-12 加）：历史回过的 tid 必须被排除 ──
+        # 3 个候选（100/200/300），历史里回过 200 → 只能从 100/300 里挑
+        try:
+            picked = p52.pick_threads(
+                FakeDriver(links), "https://x/forum-16-1.html", 2, exclude=["200"])
+            tids = [re.search(r"thread-(\d+)-", h).group(1) for _, h in picked]
+            bad = "200" in tids or len(set(tids)) != 2
+            mark = "OK " if not bad else "FAIL"
+            if bad:
+                failed.append("历史回过的 tid 又被挑中了: %r" % tids)
+            print("  [%s] 排除历史 tid 200 → 挑出 %s" % (mark, tids))
+        except Exception as err:
+            failed.append("排除历史 tid 后挑帖抛错: %s" % err)
+            print("  [FAIL] 排除历史 tid 后挑帖抛错: %s" % err)
+
+        # 历史把候选压到不够 → 必须报错，不能「回第二次」
+        try:
+            p52.pick_threads(
+                FakeDriver(links), "https://x/forum-16-1.html", 2, exclude=["200", "300"])
+            failed.append("候选被历史过滤到不足时没有报错（会变成重复回帖）")
+            print("  [FAIL] 候选被历史过滤到不足时应抛错")
+        except RuntimeError as err:
+            mark = "OK " if "不够" in str(err) else "FAIL"
+            if "不够" not in str(err):
+                failed.append("候选不足的报错没说明原因: %s" % err)
+            print("  [%s] 候选被历史过滤到不足 → 拒绝: %s" % (mark, str(err)[:50]))
     finally:
         p52.pass_waf = original_pass_waf
         p52.wait_document_ready = original_wait_ready
         p52.dump_debug = original_dump
+
+    return failed
+
+
+# ── 已回帖记录（2026-10-12 加）─────────────────────────────────────────────
+# 背景：只做「一次运行内不重复」不够——板块第一页就几十个帖子，隔天随机挑 2 个
+# 很容易再挑到昨天回过的那篇，于是同一帖下出现两条回复 → 被判刷帖扣 CB + 违规。
+# 这份记录是跨运行的黑名单，锁住它的读写与容错行为：
+#   1. 文件不存在 / 坏了 → 空记录 + 告警（不能把签到拖垮）；
+#   2. 过期条目会被清掉（否则候选池被历史慢慢吃空）；
+#   3. 有硬顶，跑几年也不会把文件撑爆；
+#   4. tid 解析必须认 thread-<tid>-x-y.html 这种真链接。
+def _check_reply_history():
+    import shutil
+    import tempfile
+
+    failed = []
+
+    def check(label, got, expect):
+        mark = "OK " if got == expect else "FAIL"
+        if got != expect:
+            failed.append("%s：得到 %r，期望 %r" % (label, got, expect))
+        print("  [%s] %s → %r" % (mark, label, got))
+
+    tmpdir = tempfile.mkdtemp(prefix="pj52_history_")
+    path = os.path.join(tmpdir, "reply_history.json")
+    try:
+        # 1) 没有文件 → 空记录，不抛错
+        check("文件不存在 → 空记录", p52.load_reply_history(path), {})
+
+        # 2) 写入 → 读回
+        history = {"1234567": {"time": "2026-10-12 09:30:00", "title": "帖子A"}}
+        p52.save_reply_history(history, path)
+        check("写入后读回", p52.load_reply_history(path).get("1234567", {}).get("title"), "帖子A")
+
+        # 3) 过期条目被清掉，新的留下
+        mixed = {
+            "1234567": {"time": "2026-10-12 09:30:00", "title": "新的"},
+            "1000001": {"time": "2020-01-01 00:00:00", "title": "很旧"},
+        }
+        p52.save_reply_history(mixed, path)
+        loaded = p52.load_reply_history(path)
+        check("过期条目被清理", "1000001" in loaded, False)
+        check("近期条目保留", "1234567" in loaded, True)
+
+        # 4) 坏文件 → 空记录（CI 上 cache 存了半截文件也不能崩）
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("{ 不是 json")
+        check("坏文件 → 空记录", p52.load_reply_history(path), {})
+
+        # 5) 硬顶：临时把上限调小
+        original_max = p52.REPLY_HISTORY_MAX
+        p52.REPLY_HISTORY_MAX = 3
+        try:
+            many = {
+                str(2000 + i): {"time": "2026-10-0%d 09:00:00" % (i % 9 + 1), "title": "t%d" % i}
+                for i in range(8)
+            }
+            p52.save_reply_history(many, os.path.join(tmpdir, "big.json"))
+            check(
+                "超过上限被截断",
+                len(p52.load_reply_history(os.path.join(tmpdir, "big.json"))),
+                3,
+            )
+        finally:
+            p52.REPLY_HISTORY_MAX = original_max
+
+        # 6) tid 提取
+        check(
+            "tid 提取",
+            p52._tid_of("https://www.52pojie.cn/thread-1340898-1-1.html"),
+            "1340898",
+        )
+        check("非帖子链接 → 空", p52._tid_of("https://www.52pojie.cn/forum-16-1.html"), "")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     return failed
 

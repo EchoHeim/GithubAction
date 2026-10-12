@@ -49,6 +49,14 @@
     PJ52_REPLY_TEXT     回帖内容，默认「谢谢分享，正好需要这个工具，感谢楼主~」
                         （别填太短：站点有最小字数限制，见 REPLY_TEXT 处的说明）
 
+    PJ52_REPLY_COUNT    一次回几个帖子，默认 2
+
+    PJ52_REPLY_INTERVAL 两条回帖之间隔几秒，默认 200。
+                        ⚠️ 下限 20（Discuz 有「两次发表间隔少于 15 秒」的硬限制）；
+                        默认之所以拉到 200：20s 只是**技术上不被拒**的最小值，而
+                        「1 分钟内连着回两条」本身就是刷帖特征（实测因此被判灌水
+                        扣 15 CB + 违规 +1）。回 2 条 = 一次运行约多花 3 分钟。
+
     PJ52_REPLY_STRICT   置 0 则回帖失败不影响整体退出码，默认 1（失败即红）
 
     PJ52_REPLY_FORMHASH_RETRIES
@@ -57,8 +65,27 @@
                         重试幂等）；内容/权限类拒绝一律不自动重试 —— 那种情况
                         内容可能已经写进去了，重试等于刷帖。
 
+    PJ52_REPLY_HISTORY  已回帖记录文件路径，默认 ./52pojie_reply_history.json
+                        （见「回帖去重」一节，CI 靠 actions/cache 把它跨运行存下来）
+    PJ52_REPLY_HISTORY_KEEP_DAYS
+                        记录保留天数，默认 180（越久远的帖子越不可能再出现在列表页）
+
 ⚠️ 回帖是「跑一次发一条」：本机/CI 手动多跑几次就会多发几条。吾爱版规明写
 「禁止复制他人回复等『恶意灌水』行为，违者重罚」，别把它当刷帖脚本用。
+
+━━━ 回帖去重（2026-10-12，被判刷帖扣 CB 后加）━━━
+只保证「一次运行内挑不同的帖子」是不够的：板块第一页就那么几十个帖子，
+每天随机挑 2 个，**隔天挑到同一篇的概率并不低** —— 于是「同一篇帖子下出现两条
+我的回复」，这正是版规里「重复回复/刷帖」的判据（实测被判灌水扣了 15 CB + 违规 +1，
+而违规在总积分公式里是 ×20 的减项，比那点 CB 疼得多）。
+
+所以去重改成**跨运行持久化**：
+  - 每次回帖（含被拒的）都把 tid 记进 PJ52_REPLY_HISTORY；
+  - 下次挑帖时把这份名单当 exclude 传给 pick_threads，历史上回过的帖子永不入选；
+  - 候选被历史过滤到不够时**报错**，绝不降级成「再回一次老帖子」。
+
+GitHub Actions 的 runner 每次都是新机器 → 文件必须靠 actions/cache 存取
+（见 .github/workflows/check_in.yml 的 Restore/Save 步骤）。本机跑则直接落在工作区。
 
 签到结果按站点真实回执判定（`#messagetext`）：申请成功 / 今日已申请 / 需补领奖励。
 任何无法归类的回执都 dump 现场后抛错，绝不再出现「打了日志就算成功」。
@@ -139,14 +166,26 @@ REPLY_TEXT = os.getenv("PJ52_REPLY_TEXT", "谢谢分享~")
 
 # 回几个帖子。同一板块里挑**互不相同**的几个普通帖（见 pick_threads）。
 REPLY_COUNT = int(os.getenv("PJ52_REPLY_COUNT", "2"))
-# 两次回帖之间的间隔（秒）。
-# ⚠️ 别低于 20：Discuz 有「两次发表间隔少于 15 秒」的硬限制，会直接拒掉第二条。
-#    20s 是刚好越过那条线的最小安全值。
-REPLY_INTERVAL = int(os.getenv("PJ52_REPLY_INTERVAL", "20"))
+# 两次回帖之间的间隔（秒）。默认 200（2026-10-12 lodge 拍板，见下）。
+# ⚠️ 下限 20：Discuz 有「两次发表间隔少于 15 秒」的硬限制，会直接拒掉第二条。
+# ⚠️ 为什么默认拉到 200 而不是原来的 20（2026-10-12）：
+#    20s 只是**技术上不被拒**的最小值，但「1 分钟内连着回两条」本身就是刷帖特征 ——
+#    实测因这个模式被判灌水，扣 15 CB + 违规 +1（违规在总积分公式里是 ×20 的减项）。
+#    200s 让两条回复间隔 3 分钟以上，行为上更像正常浏览。
+REPLY_INTERVAL = int(os.getenv("PJ52_REPLY_INTERVAL", "200"))
 
 REPLY_ENABLE = os.getenv("PJ52_REPLY", "1") != "0"
 # 回帖失败是否判定整次运行失败。默认失败（宁可红也不要静默），只签到就把它顺手关掉
 REPLY_STRICT = os.getenv("PJ52_REPLY_STRICT", "1") != "0"
+
+# ── 已回帖记录（跨运行去重，见文件头「回帖去重」）──
+# 默认落在工作区根目录：CI 里由 actions/cache 存取，本机跑就直接读写。
+REPLY_HISTORY_PATH = os.getenv(
+    "PJ52_REPLY_HISTORY", os.path.join(os.getcwd(), "52pojie_reply_history.json")
+)
+REPLY_HISTORY_KEEP_DAYS = int(os.getenv("PJ52_REPLY_HISTORY_KEEP_DAYS", "180"))
+# 上限保护：板块一天也就回 2 条，但跑久了文件会单调增长，留个硬顶
+REPLY_HISTORY_MAX = int(os.getenv("PJ52_REPLY_HISTORY_MAX", "2000"))
 
 WAF_ROUNDS = int(os.getenv("PJ52_WAF_ROUNDS", "8"))
 # 过完验证码又被拦回 WAF 页时，最多重来几次（见 open_task）
@@ -817,14 +856,91 @@ def read_credits(driver, url=""):
     return value
 
 
-def pick_threads(driver, forum_url, count, secrets=()):
+def _tid_of(href):
+    """从帖子链接里取 tid（`thread-<tid>-1-1.html`）；取不到返回空串。"""
+    match = re.search(r"/thread-(\d+)-\d+-\d+\.html", href or "")
+    return match.group(1) if match else ""
+
+
+def _history_stamp(text):
+    """记录里的时间字符串 →  epoch 秒；解析不了返回 0（当作「很旧」）。"""
+    try:
+        return time.mktime(time.strptime(text, "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
+def load_reply_history(path=REPLY_HISTORY_PATH):
+    """读已回帖记录 → {tid: {"time": "YYYY-mm-dd HH:MM:SS", "title": ...}}。
+
+    ⚠️ 文件不存在 / 坏了 / 格式不对，一律按「空记录」处理并告警：
+    这份记录只是**选帖时的黑名单**，读不出来最坏的结果是「可能回重」，
+    不该因此把签到判成失败（跟 read_credits 一个道理）。
+    但必须告警——CI 上 cache 没命中就是这种症状，不吭声的话排查方向会跑偏。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        print("===> 没有已回帖记录（%s），本次从头开始" % path)
+        return {}
+    except (OSError, ValueError) as err:
+        print("[WARN] 已回帖记录读不出来（%s），按空记录处理: %s" % (path, err))
+        return {}
+
+    if not isinstance(data, dict):
+        print("[WARN] 已回帖记录格式不是对象（%s），按空记录处理" % path)
+        return {}
+
+    history = {
+        str(tid): info
+        for tid, info in data.items()
+        if isinstance(info, dict) and str(tid).isdigit()
+    }
+
+    # 过期清理：老帖子早就不在列表页了，留着只会让文件变大、还白白缩小候选池
+    cutoff = time.time() - REPLY_HISTORY_KEEP_DAYS * 86400
+    fresh = {
+        tid: info
+        for tid, info in history.items()
+        if _history_stamp(info.get("time", "")) >= cutoff
+    }
+    dropped = len(history) - len(fresh)
+    if dropped:
+        print("===> 已回帖记录清掉 %d 条超过 %d 天的" % (dropped, REPLY_HISTORY_KEEP_DAYS))
+
+    # 硬顶：按时间从新到旧截断
+    if len(fresh) > REPLY_HISTORY_MAX:
+        ordered = sorted(
+            fresh.items(), key=lambda kv: _history_stamp(kv[1].get("time", "")), reverse=True
+        )
+        fresh = dict(ordered[:REPLY_HISTORY_MAX])
+    return fresh
+
+
+def save_reply_history(history, path=REPLY_HISTORY_PATH):
+    """把已回帖记录落盘。写失败只告警（见 load_reply_history 的说明）。"""
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(history, handle, ensure_ascii=False, indent=1, sort_keys=True)
+    except (OSError, TypeError, ValueError) as err:
+        print("[WARN] 已回帖记录写盘失败（下次可能回重）: %s" % err)
+        return False
+    return True
+
+
+def pick_threads(driver, forum_url, count, secrets=(), exclude=()):
     """在板块列表第一页里随机挑 `count` 个**互不相同**的普通帖，返回 [(标题, 链接)]。
 
     只取 `normalthread_*` 里的帖子 —— 置顶/公告是 `stickthread_*`，回那种帖没意义还容易踩版规。
 
-    ⚠️ 必须去重：同一天跑两次、或板块只有一两个帖时，`random.choice` 很可能挑到同一个，
-    于是「回 2 个帖子」实际变成「对同一个帖子回两次」—— Discuz 会拦（重复回复），
-    更糟的是这就成了刷帖。候选不够时直接报错并说明，绝不拿同一个凑数。
+    ⚠️ 两层去重，缺一层都会变成刷帖：
+      1. **列表内**：同一 tid 只算一个候选（同一帖在列表里可能重复出现）；
+      2. **跨运行**：`exclude` 里是历史回过的 tid（见 load_reply_history），
+         挑中了就等于「同一篇帖子下出现两条我的回复」—— 版规里这就是刷帖判据
+         （2026-10-12 因此被扣 15 CB + 违规 +1）。
+      候选不够时直接报错并说明，绝不拿同一个凑数。
     """
     if count <= 0:
         return []
@@ -852,8 +968,10 @@ def pick_threads(driver, forum_url, count, secrets=()):
         )
         raise RuntimeError("板块列表未找到普通帖：%s" % driver.current_url)
 
+    blocked = {str(tid) for tid in (exclude or ()) if str(tid).isdigit()}
     candidates = []
     seen = set()
+    skipped_old = 0
     for link in links:
         try:
             href = link.get_attribute("href") or ""
@@ -865,7 +983,14 @@ def pick_threads(driver, forum_url, count, secrets=()):
         if not match or not title or match.group(1) in seen:
             continue
         seen.add(match.group(1))
+        # 历史回过的帖子永不入选 —— 再回一次就是「同一帖下两条回复」
+        if match.group(1) in blocked:
+            skipped_old += 1
+            continue
         candidates.append((title, href))
+
+    if skipped_old:
+        print("===> 列表里有 %d 个帖子历史回过，已跳过" % skipped_old)
 
     if not candidates:
         dump_debug(
@@ -883,8 +1008,10 @@ def pick_threads(driver, forum_url, count, secrets=()):
             driver,
             "forum_too_few",
             notes=[
-                "板块里只有 %d 个可用普通帖，不够回 %d 个" % (len(candidates), count),
-                "可选：换一个帖子更多的板块（PJ52_FORUM_URL），或把 PJ52_REPLY_COUNT 调成 1",
+                "板块里只有 %d 个可用普通帖，不够回 %d 个（其中 %d 个历史回过已跳过）"
+                % (len(candidates), count, skipped_old),
+                "可选：换一个帖子更多的板块（PJ52_FORUM_URL），把 PJ52_REPLY_COUNT 调成 1，"
+                "或清掉 %s 里的旧记录" % REPLY_HISTORY_PATH,
             ],
             secrets=secrets,
         )
@@ -905,9 +1032,9 @@ def pick_threads(driver, forum_url, count, secrets=()):
     return picked
 
 
-def pick_thread(driver, forum_url, secrets=()):
+def pick_thread(driver, forum_url, secrets=(), exclude=()):
     """单数版本，保留给只要一条的场景（内部走 pick_threads）。"""
-    return pick_threads(driver, forum_url, 1, secrets)[0]
+    return pick_threads(driver, forum_url, 1, secrets, exclude=exclude)[0]
 
 
 def read_formhash(driver):
@@ -1330,18 +1457,33 @@ def reply_thread(driver, url, text, secrets=(), _attempt=0):
     raise RuntimeError("点击发表回复后状态未明（%s）" % (detail[:120] or "空"))
 
 
-def reply_many_threads(driver, forum_url, text, secrets=(), count=1, interval=20):
+def reply_many_threads(driver, forum_url, text, secrets=(), count=1,
+                       interval=REPLY_INTERVAL, history_path=REPLY_HISTORY_PATH):
     """依次回 `count` 个帖子，每次之间等 `interval` 秒。返回 [(标题, 结果字符串)]。
 
     ⚠️ 间隔是硬要求，不是「礼节」：Discuz 对连续发表有「两次发表间隔少于 15 秒」的
     限制，第二条会直接被拒（回执「抱歉，您的两次发表间隔少于 15 秒」）。
-    20s 是刚越过那条线的最小值。
+    默认 200s：技术上 20s 就够，但「1 分钟连着回两条」本身就是刷帖特征，
+    2026-10-12 因此被判灌水扣 15 CB + 违规 +1 —— 别往 20 以下调，也别轻易往回调。
+
+    ⚠️ 跨运行去重在这里落地：先读历史记录当 exclude 传给 pick_threads，
+    每回完一条就把 tid 写进记录**并立刻落盘**（不是等全部回完再写）——
+    中间某条失败、或者 job 10 分钟超时被杀，已经发出去的那条也不会丢记录，
+    下次就不会对它再发一次。被拒的也记：服务端「可能已经写进去了」的情况下，
+    宁可少回一条，也不要在同一帖下出现第二条。
 
     失败处理刻意做成「**不因单条失败而中断后续**」：
     第 1 条失败（比如 formhash 失效）不代表第 2 条也会失败，而漏掉一条就是少拿一天的互动分。
     但每条失败都完整记录，最后由调用方决定要不要按 REPLY_STRICT 让整体变红。
     """
-    targets = pick_threads(driver, forum_url, count, secrets)
+    history = load_reply_history(history_path)
+    if history:
+        print(
+            "===> 已回过 %d 个帖子（%s），本次不会再回它们"
+            % (len(history), history_path)
+        )
+
+    targets = pick_threads(driver, forum_url, count, secrets, exclude=history.keys())
     results = []
 
     for index, (title, href) in enumerate(targets):
@@ -1361,6 +1503,16 @@ def reply_many_threads(driver, forum_url, text, secrets=(), count=1, interval=20
             detail = "失败：%s" % str(err)[:120]
             print("===> 回帖 %d/%d 失败: %s" % (index + 1, len(targets), err))
             results.append((title, detail))
+
+        # 无论成功还是被拒，这篇帖子本次都「碰过了」→ 记进历史，别再回第二次
+        tid = _tid_of(href)
+        if tid:
+            history[tid] = {
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "title": title[:60],
+                "result": results[-1][1][:60],
+            }
+            save_reply_history(history, history_path)
 
     return results
 

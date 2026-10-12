@@ -14,6 +14,9 @@ v2ex-debug/
 juejin-debug/
 ns211-debug/
 
+# 已回帖记录（跨运行去重黑名单；本机跑会在工作区生成，CI 靠 actions/cache 存取）
+52pojie_reply_history.json
+
 # Distribution / packaging
 .Python
 build/
