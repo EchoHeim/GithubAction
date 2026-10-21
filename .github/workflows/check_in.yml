@@ -18,6 +18,7 @@ on:
         options:
           - all
           - v2ex
+          # 52pojie 已暂停（2026-10-21），选它会直接跳过、什么都不跑
           - 52pojie
           - juejin
           - ns211
@@ -92,7 +93,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # 52pojie 的任务页被自家 wzws WAF 保护（图片验证码，脚本用 ddddocr 过），
+      # ===== 52pojie 已暂停（2026-10-21）=====
+      # 下面 Restore / Check in 两步都置为 `if: false`，整个 job 不再跑 52pojie，
+      # 其余站点（V2EX / 掘金 / NS211）的定时签到不受影响。
+      # 要恢复就把这两处的 `if: false` 换回各自注释里的原条件。
+      #
+      # （背景备忘）52pojie 的任务页被自家 wzws WAF 保护（图片验证码，脚本用 ddddocr 过），
       # 而**登录页有人机验证（Cloudflare Turnstile），自动化过不去** —— 所以凭据用登录态
       # Cookie（PJ52_COOKIE），跳过登录页。用户名/密码作为兜底保留，但脚本会快失败并提示。
       # Cookie 失效时（Discuz 会话约一个月）去浏览器重新登录后再抄一次。
@@ -102,7 +108,9 @@ jobs:
       # （脚本侧见 Selenium/CheckIN/52pojie.py 的 load_reply_history）。
       # key 带 run_id → 每次都存一份新的；restore-keys 兜住上一份。
       - name: Restore 52pojie reply history
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
+        if: false
+        # 恢复用原条件：
+        # ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
         uses: actions/cache@v4
         with:
           path: 52pojie_reply_history.json
@@ -111,7 +119,9 @@ jobs:
             pj52-reply-history-
 
       - name: Check in 52pojie
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
+        if: false
+        # 恢复用原条件：
+        # ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == '52pojie') }}
         # 10 → 15：PJ52_REPLY_INTERVAL 默认 200s（2026-10-12 从 20s 提上来），
         # 回 2 条光等间隔就 3 分多钟，加上过 WAF 和逐个开帖子，10 分钟不够余量。
         timeout-minutes: 15
