@@ -83,6 +83,40 @@ def dump_login_structure(driver):
     print("===== END STRUCTURE =====")
 
 
+def set_input_value(driver, el, value):
+    """输入并补发事件。
+
+    passport 是 Vue 受控表单，按钮的 disabled 是跟着 model 走的。无头环境下
+    send_keys 的合成事件偶尔不触发 v-model，症状很阴：输入框里明明有字，
+    「下一步」却一直挂着 .disabled，于是后面「找不到可点击的提交按钮」。
+    本地实测：真实键入后按钮的 class 会从 submit-btn disabled 变成 submit-btn，
+    所以这里在键入之后再补发一轮 input/change（值相同，幂等）。
+    """
+    try:
+        el.click()
+    except Exception:
+        pass
+    el.clear()
+    el.send_keys(value)
+    driver.execute_script(
+        """
+        var el = arguments[0], v = arguments[1];
+        if (el.value !== v) { el.value = v; }
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+        """,
+        el,
+        value,
+    )
+    try:
+        filled = el.get_attribute("value") or ""
+    except Exception:
+        filled = ""
+    if filled != value:
+        print("[WARN] 输入框回读不符(expected %d, got %d)" % (len(value), len(filled)))
+    return el
+
+
 def fill_by_name(driver, names, value, timeout=8):
     """按 name 精确定位输入框（比 placeholder 稳，避免跨 tab 误填）。"""
     for name in names:
@@ -90,8 +124,7 @@ def fill_by_name(driver, names, value, timeout=8):
             el = WebDriverWait(driver, timeout).until(
                 EC.element_to_be_clickable((By.XPATH, "//input[@name='%s']" % name))
             )
-            el.clear()
-            el.send_keys(value)
+            set_input_value(driver, el, value)
             print("[LOG] 已填入输入框(name=%s)" % name)
             return el
         except Exception:
@@ -99,26 +132,61 @@ def fill_by_name(driver, names, value, timeout=8):
     raise AssertionError("找不到输入框 name: %s" % names)
 
 
-def click_submit(driver, values=("下一步", "登录"), timeout=8):
-    """点击当前可见、未禁用的提交按钮（input[type=submit] / button）。"""
-    for v in values:
-        for xp in (
-            "//input[@type='submit' and contains(@value,'%s') and not(contains(@class,'disabled'))]" % v,
-            # 富途 passport 的按钮大量是 <input type="button" class="submit-btn">，
-            # 只认 type=submit 会漏掉「立即验证 / 登录」这类按钮
-            "//input[@type='button' and contains(@value,'%s') and not(contains(@class,'disabled'))]" % v,
-            "//button[contains(normalize-space(.),'%s') and not(contains(@class,'disabled'))]" % v,
-        ):
+SUBMIT_EXCLUDE = ("验证方式", "返回", "忘记", "获取", "发送", "重发", "扫码", "其他")
+
+
+def click_submit(driver, values=("下一步", "登录", "继续"), timeout=10):
+    """点击可见、未禁用的提交按钮。
+
+    富途登录页的按钮随流程换文案（下一步 / 登录），密码为空时还带 .disabled 样式
+    （只是 class，不是真 disabled 属性）。原来按文案配 XPath 逐个长等，一旦文案
+    对不上就白等 8 秒 ×9 次还找不到；这里改成每秒扫一遍 DOM，按文案优先、
+    「可见的提交型控件」兜底，两者都没有才报错并带上页面快照。
+    """
+    deadline = time.time() + timeout
+    while True:
+        fallback = None
+        try:
+            candidates = driver.find_elements(
+                By.CSS_SELECTOR, "input[type='submit'], input[type='button'], button"
+            )
+        except Exception:
+            candidates = []
+        for el in candidates:
             try:
-                el = WebDriverWait(driver, timeout).until(
-                    EC.element_to_be_clickable((By.XPATH, xp))
-                )
-                el.click()
-                print("[LOG] 已点击提交按钮: %s" % v)
-                return el
+                if not el.is_displayed() or not el.is_enabled():
+                    continue
+                label = (el.get_attribute("value") or el.text or "").strip()
+                cls = el.get_attribute("class") or ""
             except Exception:
                 continue
-    raise AssertionError("找不到可点击的提交按钮: %s" % (values,))
+            if "disabled" in cls:
+                continue
+            if any(v in label for v in values):
+                el.click()
+                print("[LOG] 已点击提交按钮: %s" % label)
+                return el
+            if fallback is None and not any(x in label for x in SUBMIT_EXCLUDE):
+                if "submit" in cls or el.tag_name == "button":
+                    fallback = (el, label)
+        if time.time() >= deadline:
+            break
+        time.sleep(1)
+    if fallback is not None:
+        fallback[0].click()
+        print("[LOG] 按兜底规则点击提交按钮: %s" % fallback[1])
+        return fallback[0]
+    raise AssertionError(
+        "找不到可点击的提交按钮: %s | %s" % (values, describe_page(driver))
+    )
+
+
+def submit_or_fail(driver, step, values=("下一步", "登录", "继续")):
+    """点提交，失败时把步骤名带进异常 —— annotation 里一眼看出卡在哪一步。"""
+    try:
+        return click_submit(driver, values)
+    except AssertionError as e:
+        raise AssertionError("[%s] %s" % (step, e)) from e
 
 
 def find_by_placeholder(driver, subs, value, timeout=8):
@@ -233,10 +301,24 @@ for (var i = 0; i < nodes.length && out.texts.length < 16; i++) {
     seen[t] = 1;
     out.texts.push(t);
 }
+// input 型按钮的文案在 value 里，innerText 取不到，单独采一遍
+var btns = document.querySelectorAll('input[type="submit"],input[type="button"]');
+for (var k = 0; k < btns.length && out.texts.length < 24; k++) {
+    var b = btns[k];
+    var rb = b.getBoundingClientRect();
+    if (rb.width <= 0 || rb.height <= 0) { continue; }
+    out.texts.push('btn:' + (b.value || '') + '(' + (b.className || '') + ')');
+}
 var ins = document.querySelectorAll('input');
-for (var j = 0; j < ins.length; j++) {
+for (var j = 0; j < ins.length && out.inputs.length < 10; j++) {
     var e = ins[j];
-    out.inputs.push([e.type || '', e.name || '', e.placeholder || ''].join('/'));
+    var r2 = e.getBoundingClientRect();
+    var hidden = (r2.width <= 0 || r2.height <= 0) ? 'hidden:' : '';
+    var typ = (e.type || '').toLowerCase();
+    // 密码值绝不能落到 GitHub 的 annotation 里
+    var val = typ === 'password' ? (e.value ? '***' : '') : (e.value || '');
+    out.inputs.push((hidden + [e.tagName, typ, e.name || '', val,
+        e.placeholder || '', e.className || ''].join('/')).slice(0, 90));
 }
 return out;
 """
@@ -331,27 +413,50 @@ def click_text_js(driver, texts, timeout=8):
     return None
 
 
-def fill_password(driver, value, timeout=5):
-    """优先按 input[type=password] 定位，失败再退回 placeholder 匹配。"""
-    def find_visible(d):
-        for el in d.find_elements(By.CSS_SELECTOR, "input[type='password']"):
+def fill_password(driver, value, timeout=6):
+    """填密码框。
+
+    富途密码框的 name 是 password / password-<时间戳>（香港账户），type 又会随
+    「显示密码」开关在 text/password 之间切换，所以按 name 前缀定位最稳。
+    另有坑：send_keys 后 Vue 的 v-model 偶尔没跟上，按钮会一直挂着 .disabled，
+    表现为「密码明明填了但点不动登录」。这里回读 value 校验，必要时补发事件。
+    """
+    css_tiers = (
+        "input.form-input[name^='password']",
+        "input[name^='password'], input[type='password']",
+    )
+    el = None
+    deadline = time.time() + timeout
+    while time.time() < deadline and el is None:
+        for css in css_tiers:
             try:
-                if el.is_displayed() and el.is_enabled():
-                    return el
+                candidates = driver.find_elements(By.CSS_SELECTOR, css)
             except Exception:
                 continue
-        return False
-
-    try:
-        el = WebDriverWait(driver, timeout).until(find_visible)
-        el.clear()
-        el.send_keys(value)
-        print("[LOG] 已填入密码框(type=password)")
-        return el
-    except Exception:
+            for candidate in candidates:
+                try:
+                    if candidate.is_displayed() and candidate.is_enabled():
+                        el = candidate
+                        break
+                except Exception:
+                    continue
+            if el is not None:
+                break
+        if el is None:
+            time.sleep(0.5)
+    if el is None:
         return find_by_placeholder(
             driver, ["请输入密码", "登录密码", "密码", "password"], value
         )
+
+    try:
+        el.click()
+    except Exception:
+        pass
+    set_input_value(driver, el, value)
+
+    print("[LOG] 已填入密码框(name=%s)" % (el.get_attribute("name") or ""))
+    return el
 
 
 def login(browser):
@@ -370,7 +475,7 @@ def login(browser):
         find_by_placeholder(browser, ["牛牛号", "账号"], username)
 
     # 第一步提交
-    click_submit(browser, ("下一步", "登录", "继续"))
+    submit_or_fail(browser, "账号步骤", ("下一步", "登录", "继续"))
 
     stage = wait_login_stage(browser, timeout=18)
     if not stage.get("passwordInput") and stage.get("passkey"):
@@ -397,7 +502,7 @@ def login(browser):
     fill_password(browser, password)
 
     # 第二步提交（下一步 / 登录）
-    click_submit(browser, ("下一步", "登录", "继续"))
+    submit_or_fail(browser, "密码步骤", ("下一步", "登录", "继续"))
 
     # 等页面跳转到种子农场
     time.sleep(5)
