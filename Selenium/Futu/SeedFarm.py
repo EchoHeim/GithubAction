@@ -135,6 +135,36 @@ def fill_by_name(driver, names, value, timeout=8):
 SUBMIT_EXCLUDE = ("验证方式", "返回", "忘记", "获取", "发送", "重发", "扫码", "其他")
 
 
+def robust_click(driver, el, retries=2):
+    """点按钮，先原生、再容忍遮罩。
+
+    passport 校验账号/提交时会挂一层全局 loading（<div class="loading-icon">），
+    遮罩期间原生 click 直接报 "element click intercepted"，实测就是这样把提交
+    卡死的。这里先手动滚到视野内点，遇到遮挡等一会儿重试，仍不行就用 JS 派发
+    click 绕过遮罩（Vue 的 @click / form submit 照样会触发）。
+    """
+    try:
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", el
+        )
+    except Exception:
+        pass
+    time.sleep(0.3)
+    for _ in range(retries):
+        try:
+            el.click()
+            return True
+        except Exception as e:  # noqa
+            msg = str(e)
+            if "intercepted" in msg or "not clickable" in msg:
+                time.sleep(1.5)
+                continue
+            break
+    driver.execute_script("arguments[0].click();", el)
+    print("[LOG] 按钮被遮挡，已改用 JS 派发 click")
+    return True
+
+
 def click_submit(driver, values=("下一步", "登录", "继续"), timeout=10):
     """点击可见、未禁用的提交按钮。
 
@@ -163,7 +193,7 @@ def click_submit(driver, values=("下一步", "登录", "继续"), timeout=10):
             if "disabled" in cls:
                 continue
             if any(v in label for v in values):
-                el.click()
+                robust_click(driver, el)
                 print("[LOG] 已点击提交按钮: %s" % label)
                 return el
             if fallback is None and not any(x in label for x in SUBMIT_EXCLUDE):
@@ -173,7 +203,7 @@ def click_submit(driver, values=("下一步", "登录", "继续"), timeout=10):
             break
         time.sleep(1)
     if fallback is not None:
-        fallback[0].click()
+        robust_click(driver, fallback[0])
         print("[LOG] 按兜底规则点击提交按钮: %s" % fallback[1])
         return fallback[0]
     raise AssertionError(
@@ -250,7 +280,7 @@ def click_switch(driver, texts, timeout=8, ignore=True):
         xp = "//a[contains(@class,'switch-btn')][normalize-space(.)='%s']" % t
         try:
             el = wait_for_visible_enabled(driver, By.XPATH, xp, timeout)
-            el.click()
+            robust_click(driver, el)
             print("[LOG] 已点击切换: %s" % t)
             return el
         except Exception:
