@@ -104,6 +104,9 @@ def click_submit(driver, values=("下一步", "登录"), timeout=8):
     for v in values:
         for xp in (
             "//input[@type='submit' and contains(@value,'%s') and not(contains(@class,'disabled'))]" % v,
+            # 富途 passport 的按钮大量是 <input type="button" class="submit-btn">，
+            # 只认 type=submit 会漏掉「立即验证 / 登录」这类按钮
+            "//input[@type='button' and contains(@value,'%s') and not(contains(@class,'disabled'))]" % v,
             "//button[contains(normalize-space(.),'%s') and not(contains(@class,'disabled'))]" % v,
         ):
             try:
@@ -190,6 +193,167 @@ def click_switch(driver, texts, timeout=8, ignore=True):
     raise AssertionError("找不到切换按钮: %s" % (texts,))
 
 
+# ---------- 登录阶段探测 ----------
+# 2026-11 起富途按 SFC 要求推行通行密钥：账号一旦绑定 passkey，提交账号后会被直接
+# 带到 #/verifyPasskey（标题「验证通行密钥」），页面上根本没有密码输入框。
+# 无头环境没有平台认证器，必须先点「其他验证方式」再选「密码登录」降级，
+# 否则整条流程卡死在第二步（2026-11-04 起连续失败即此因）。
+PASSKEY_TEXTS = ["其他验证方式", "其他驗證方式", "Other Options"]
+PASSWORD_LOGIN_TEXTS = ["密码登录", "密碼登錄", "密碼登入", "Sign in with password"]
+
+STAGE_JS = r"""
+var out = {url: location.href, passwordInput: false, passkey: false, text: ''};
+var inputs = document.querySelectorAll('input');
+for (var i = 0; i < inputs.length; i++) {
+    var el = inputs[i];
+    if ((el.type || '').toLowerCase() !== 'password') { continue; }
+    var r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) { out.passwordInput = true; break; }
+}
+var text = (document.body && document.body.innerText) ? document.body.innerText : '';
+out.text = text.replace(/\s+/g, ' ').slice(0, 400);
+if (/验证通行密钥|驗證通行密鑰|Verify with Passkey/i.test(text)) { out.passkey = true; }
+if (/其他验证方式|其他驗證方式|Other Options/i.test(text)) { out.passkey = true; }
+return out;
+"""
+
+# 失败时把页面上「看得见的按钮/标题」和输入框属性带进异常消息：
+# GitHub Actions 只保留 annotation 里的错误文案，日志正文在手机上翻不动，
+# 把线索塞进异常本身，下一次失败就能直接改选择器。
+SNAPSHOT_JS = r"""
+var out = {url: location.href, title: document.title, texts: [], inputs: []};
+var nodes = document.querySelectorAll('a,button,[role="button"],h1,h2,h3,label');
+var seen = {};
+for (var i = 0; i < nodes.length && out.texts.length < 16; i++) {
+    var el = nodes[i];
+    var r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) { continue; }
+    var t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 28 || seen[t]) { continue; }
+    seen[t] = 1;
+    out.texts.push(t);
+}
+var ins = document.querySelectorAll('input');
+for (var j = 0; j < ins.length; j++) {
+    var e = ins[j];
+    out.inputs.push([e.type || '', e.name || '', e.placeholder || ''].join('/'));
+}
+return out;
+"""
+
+
+def probe_login_stage(driver):
+    """返回当前登录阶段快照；脚本注入失败时给保守默认值。"""
+    try:
+        return driver.execute_script(STAGE_JS) or {}
+    except Exception as e:  # noqa
+        print("[WARN] 登录阶段探测失败:", e)
+        return {"passwordInput": False, "passkey": False, "text": "", "url": ""}
+
+
+def wait_login_stage(driver, timeout=15):
+    """轮询到出现密码框为止（或超时），返回最后一次快照。"""
+    deadline = time.time() + timeout
+    stage = probe_login_stage(driver)
+    while time.time() < deadline:
+        if stage.get("passwordInput"):
+            return stage
+        time.sleep(1)
+        stage = probe_login_stage(driver)
+    return stage
+
+
+def describe_page(driver):
+    """把当前页面的可见文案/输入框压成一行，供异常消息携带。"""
+    try:
+        s = driver.execute_script(SNAPSHOT_JS) or {}
+    except Exception as e:  # noqa
+        return "页面快照失败: %s" % e
+    return "url=%s | 可点/标题=%s | 输入框=%s" % (
+        s.get("url", ""),
+        "、".join(s.get("texts") or [])[:280],
+        "、".join(s.get("inputs") or [])[:160],
+    )
+
+
+def click_text_js(driver, texts, timeout=8):
+    """按可见文本点击。
+
+    不用 //*[contains(normalize-space(.),'x')]：这个写法按文档顺序第一个命中的是
+    html 根节点（它同样 contains 全部文本），点上去等于没点。这里只在文本完全相等的
+    叶子节点里找，再向上取最近的按钮/链接派发 click，跨 DOM 改版更耐用。
+    """
+    js = r"""
+    var texts = arguments[0];
+    function visible(el) {
+        var r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) { return false; }
+        var s = getComputedStyle(el);
+        if (s.visibility === 'hidden' || s.display === 'none') { return false; }
+        return parseFloat(s.opacity || '1') > 0.01;
+    }
+    function labelOf(el) {
+        // 富途的按钮多为 <input type="button" value="其他验证方式">，innerText 是空的，
+        // 只认 innerText 会漏掉整类控件（passkey 页的降级按钮就在这一类里）
+        var tag = (el.tagName || '').toUpperCase();
+        var raw = (tag === 'INPUT' || tag === 'TEXTAREA')
+            ? (el.value || '')
+            : (el.innerText || el.textContent || '');
+        return raw.replace(/\s+/g, ' ').trim();
+    }
+    var nodes = document.querySelectorAll(
+        'a,button,span,div,p,li,label,strong,em,input[type="button"],input[type="submit"]'
+    );
+    for (var i = 0; i < texts.length; i++) {
+        for (var j = 0; j < nodes.length; j++) {
+            var el = nodes[j];
+            var txt = labelOf(el);
+            if (txt !== texts[i] || !visible(el)) { continue; }
+            var target = el.closest('a,button,[role="button"],input') || el;
+            if (target.disabled) { continue; }
+            target.click();
+            return target.tagName + '|' + txt;
+        }
+    }
+    return null;
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            hit = driver.execute_script(js, texts)
+        except Exception:
+            hit = None
+        if hit:
+            print("[LOG] 已点击文本控件: %s" % hit)
+            return hit
+        time.sleep(1)
+    print("[WARN] 未找到可点文本: %s" % (texts,))
+    return None
+
+
+def fill_password(driver, value, timeout=5):
+    """优先按 input[type=password] 定位，失败再退回 placeholder 匹配。"""
+    def find_visible(d):
+        for el in d.find_elements(By.CSS_SELECTOR, "input[type='password']"):
+            try:
+                if el.is_displayed() and el.is_enabled():
+                    return el
+            except Exception:
+                continue
+        return False
+
+    try:
+        el = WebDriverWait(driver, timeout).until(find_visible)
+        el.clear()
+        el.send_keys(value)
+        print("[LOG] 已填入密码框(type=password)")
+        return el
+    except Exception:
+        return find_by_placeholder(
+            driver, ["请输入密码", "登录密码", "密码", "password"], value
+        )
+
+
 def login(browser):
     print(browser.title)
 
@@ -206,17 +370,34 @@ def login(browser):
         find_by_placeholder(browser, ["牛牛号", "账号"], username)
 
     # 第一步提交
-    click_submit(browser, ("下一步",))
+    click_submit(browser, ("下一步", "登录", "继续"))
+
+    stage = wait_login_stage(browser, timeout=18)
+    if not stage.get("passwordInput") and stage.get("passkey"):
+        print("[WARN] 进入通行密钥验证页，尝试降级到密码登录")
+        if click_text_js(browser, PASSKEY_TEXTS, timeout=6):
+            # useOtherMethods 走的是 SPA 路由（name=verifyPwd），不会刷新页面
+            stage = wait_login_stage(browser, timeout=8)
+        if not stage.get("passwordInput"):
+            # 少数版本会先弹验证方式列表，再选「密码登录」
+            click_text_js(browser, PASSWORD_LOGIN_TEXTS, timeout=5)
+            stage = wait_login_stage(browser, timeout=6)
+
+    if not stage.get("passwordInput"):
+        url = stage.get("url") or ""
+        text = stage.get("text") or ""
+        if "verifySms" in url or "验证码" in text or "驗證碼" in text:
+            raise AssertionError(
+                "富途把登录改成了短信验证码（CI 收不到短信），需要人工处理：%s"
+                % describe_page(browser)
+            )
+        raise AssertionError("账号提交后没等到密码框：%s" % describe_page(browser))
 
     # 第二步：输入密码
-    find_by_placeholder(
-        browser,
-        ["请输入密码", "登录密码", "密码", "password"],
-        password,
-    )
+    fill_password(browser, password)
 
     # 第二步提交（下一步 / 登录）
-    click_submit(browser)
+    click_submit(browser, ("下一步", "登录", "继续"))
 
     # 等页面跳转到种子农场
     time.sleep(5)
@@ -225,7 +406,7 @@ def login(browser):
     if "passport" in (browser.current_url or ""):
         print("[WARN] 仍在登录页，可能触发了滑块/图形验证码")
         dump_debug(browser, "login-after")
-        raise AssertionError("登录后仍停留在 passport 页面")
+        raise AssertionError("登录后仍停留在 passport 页面：%s" % describe_page(browser))
     return browser
 
 
