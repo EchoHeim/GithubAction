@@ -16,7 +16,12 @@ title = "富途种子"
 msg = ""
 
 # 富途牛牛 种子农场 登录地址
-website = "https://passport.futunn.com/?target=https%3A%2F%2Fseed.futunn.com%2F%3Flang%3Dzh-cn%26panel%3Dcultureroom#login"
+# 必须显式带 lang=zh-cn：runner 在海外时 passport 会按 IP 出英文界面（html lang=en-us），
+# 页面上根本没有「登录」「邮箱/牛牛号」这些中文文案，按文本匹配的步骤会集体失效。
+website = (
+    "https://passport.futunn.com/?lang=zh-cn"
+    "&target=https%3A%2F%2Fseed.futunn.com%2F%3Flang%3Dzh-cn%26panel%3Dcultureroom#login"
+)
 
 
 def dump_debug(browser, tag="overall"):
@@ -133,6 +138,7 @@ def fill_by_name(driver, names, value, timeout=8):
 
 
 SUBMIT_EXCLUDE = ("验证方式", "返回", "忘记", "获取", "发送", "重发", "扫码", "其他")
+SUBMIT_TEXTS = ("下一步", "登录", "继续", "Next", "Log In", "Sign In")
 
 
 def robust_click(driver, el, retries=2):
@@ -165,7 +171,7 @@ def robust_click(driver, el, retries=2):
     return True
 
 
-def click_submit(driver, values=("下一步", "登录", "继续"), timeout=10):
+def click_submit(driver, values=SUBMIT_TEXTS, timeout=10):
     """点击可见、未禁用的提交按钮。
 
     富途登录页的按钮随流程换文案（下一步 / 登录），密码为空时还带 .disabled 样式
@@ -211,7 +217,7 @@ def click_submit(driver, values=("下一步", "登录", "继续"), timeout=10):
     )
 
 
-def submit_or_fail(driver, step, values=("下一步", "登录", "继续")):
+def submit_or_fail(driver, step, values=SUBMIT_TEXTS):
     """点提交，失败时把步骤名带进异常 —— annotation 里一眼看出卡在哪一步。"""
     try:
         return click_submit(driver, values)
@@ -289,6 +295,110 @@ def click_switch(driver, texts, timeout=8, ignore=True):
         print("[LOG] 未找到切换: %s（继续）" % (texts,))
         return None
     raise AssertionError("找不到切换按钮: %s" % (texts,))
+
+
+def ensure_chinese(driver, timeout=10):
+    """把界面语言钉死为简体中文。
+
+    passport 按 IP / 浏览器语言决定界面语言：海外 runner 上会渲染成英文
+    （<html lang="en-us">，按钮变成 Email/User ID、Next…），所有按中文文案做的
+    定位就全废了。URL 上的 ?lang=zh-cn 是第一道保险，这里再做一道：真出了英文
+    就点右上角语言菜单切回来（data-lang 属性不随界面语言变化，可靠）。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        lang = ""
+        try:
+            lang = driver.execute_script("return document.documentElement.lang || ''")
+        except Exception:
+            pass
+        if (lang or "").lower().startswith("zh"):
+            return True
+        try:
+            driver.execute_script(
+                "var t = document.querySelector('.lang-select__trigger'); if (t) t.click();"
+            )
+            time.sleep(0.5)
+            hit = driver.execute_script(
+                "var el = document.querySelector('[data-lang=\"zh-cn\"]');"
+                "if (!el) return null;"
+                "el.click();"
+                "return (el.textContent || '').trim();"
+            )
+            if hit:
+                print("[LOG] 界面语言不是中文(%s)，已切换: %s" % (lang, hit))
+                time.sleep(3)
+                continue
+        except Exception as e:  # noqa
+            print("[WARN] 切换界面语言失败:", e)
+        time.sleep(1)
+    return False
+
+
+def switch_exists(driver, text):
+    """页面上是否存在可见的模式切换链接。"""
+    for el in driver.find_elements(By.CSS_SELECTOR, "a.switch-btn"):
+        try:
+            if el.is_displayed() and (el.text or "").strip() == text:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def page_mode(driver):
+    """读 .index-wrapper 的 data-type，返回 'login' / 'reg'，读不到返回 None。"""
+    try:
+        return driver.execute_script(
+            "var el = document.querySelector('.index-wrapper');"
+            "return el ? el.getAttribute('data-type') : null;"
+        )
+    except Exception:
+        return None
+
+
+def ensure_login_mode(driver, tries=3):
+    """确保停在「登录」模式。
+
+    页面默认可能停在「注册」（底部才有「登录」切换），也可能直接就是「登录」
+    —— 后者页面上根本没有名为「登录」的 switch-btn。旧写法 ignore=False 遇到
+    这种情况直接抛「找不到切换按钮」，2026-11-13 起连挂就挂在这。
+    """
+    for _ in range(tries):
+        if page_mode(driver) == "login":
+            print("[LOG] 当前已在登录模式")
+            return True
+        if click_switch(driver, ["登录", "Log In", "Sign In"], timeout=4, ignore=True):
+            time.sleep(1.5)
+            continue
+        if switch_exists(driver, "注册") or switch_exists(driver, "Sign Up"):
+            print("[LOG] 无「登录」切换但有「注册」，按已在登录模式处理")
+            return True
+        time.sleep(1)
+    return page_mode(driver) == "login"
+
+
+def account_tab_ready(driver):
+    for el in driver.find_elements(By.CSS_SELECTOR, "input[name='account']"):
+        try:
+            if el.is_displayed():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def ensure_account_tab(driver, tries=2):
+    """切到「邮箱/牛牛号」表单；已经显示就跳过。"""
+    for _ in range(tries):
+        if account_tab_ready(driver):
+            print("[LOG] 「邮箱/牛牛号」表单已就绪")
+            return True
+        click_switch(
+            driver, ["邮箱/牛牛号", "Email/User ID", "Email/UserID"], timeout=6, ignore=True
+        )
+        time.sleep(1.5)
+    return account_tab_ready(driver)
 
 
 # ---------- 登录阶段探测 ----------
@@ -492,11 +602,13 @@ def fill_password(driver, value, timeout=6):
 def login(browser):
     print(browser.title)
 
-    # 确保在「登录」页签（页面有时默认停在「注册」，需切一下）
-    click_switch(browser, ["登录"], ignore=False)
+    ensure_chinese(browser)
 
-    # 切到「邮箱 / 牛牛号」登录方式（默认是手机+验证码，没有密码框）
-    click_switch(browser, ["邮箱/牛牛号"], ignore=False)
+    if not ensure_login_mode(browser):
+        raise AssertionError("没能进入登录模式：%s" % describe_page(browser))
+
+    if not ensure_account_tab(browser):
+        raise AssertionError("没能切到「邮箱/牛牛号」登录：%s" % describe_page(browser))
 
     # 账号：按 name=account 精确定位（别被 email 的「邮箱地址」placeholder 抢先匹配）
     try:
@@ -505,7 +617,7 @@ def login(browser):
         find_by_placeholder(browser, ["牛牛号", "账号"], username)
 
     # 第一步提交
-    submit_or_fail(browser, "账号步骤", ("下一步", "登录", "继续"))
+    submit_or_fail(browser, "账号步骤")
 
     stage = wait_login_stage(browser, timeout=18)
     if not stage.get("passwordInput") and stage.get("passkey"):
@@ -532,7 +644,7 @@ def login(browser):
     fill_password(browser, password)
 
     # 第二步提交（下一步 / 登录）
-    submit_or_fail(browser, "密码步骤", ("下一步", "登录", "继续"))
+    submit_or_fail(browser, "密码步骤")
 
     # 等页面跳转到种子农场
     time.sleep(5)
