@@ -146,6 +146,15 @@ ERROR_NGINX = """<html><head><title>502 Bad Gateway</title></head>
 CLOUDFLARE_BLOCK = """<html><head><title>Attention Required! | Cloudflare</title></head>
 <body>Sorry, you have been blocked. Cloudflare Ray ID: 8a9b</body></html>"""
 
+# 2026-11-06 起 v2ex.com 全站返回的就是这一页（真实 DOM 的裁剪版）。
+# 它比 502 更阴——URL 完全正常、HTTP 200、页面还有 45KB，只是没有登录表单。
+CHALLENGE_PAGE = """<!DOCTYPE html><html lang="zh-cn"><head><title>请稍候…</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"></head><body>
+<div id="challenge-running"></div><noscript><div>Enable JavaScript and cookies to continue</div></noscript>
+<script>(function(){window._cf_chl_opt = {cFPWv: 'b', cITimeS: '1794818385'};})();</script>
+<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>
+</body></html>"""
+
 HOME_LOGGED_IN = (
     "<html><body><div id='Top'><a href='/signout'>登出</a>"
     "<a href='/balance'>1,234</a></div>"
@@ -338,6 +347,23 @@ class ErrorHintTest(unittest.TestCase):
         # V2EX 登录页源码不算长，但它带 /signin 与 captcha 标记
         self.assertEqual("", v2ex.error_hint(FakeDriver(SIGNIN_PAGE)))
 
+    def test_detects_cloudflare_challenge(self):
+        # 2026-11-06 起的真凶：整站挑战页。认不出来就只能等密码框超时，
+        # 5 轮重试后报一句「已尝试 5 次」，什么线索都没有。
+        hint = v2ex.error_hint(FakeDriver(CHALLENGE_PAGE))
+        self.assertTrue(hint, "挑战页必须被认出来")
+        self.assertIn("挑战", hint)
+        print("challenge ->", hint)
+
+    def test_challenge_tag_is_marked(self):
+        # open_ready 靠这个前缀决定「不重试，直接换域名」
+        hint = v2ex.error_hint(FakeDriver(CHALLENGE_PAGE))
+        self.assertTrue(hint.startswith(v2ex.CHALLENGE_TAG))
+
+    def test_normal_page_is_not_challenge(self):
+        for page in (HOME_LOGGED_IN, SIGNIN_PAGE, MISSION_CLAIMABLE):
+            self.assertEqual("", v2ex.challenge_hint(page))
+
     def test_broken_driver_reports_error(self):
         class Boom(object):
             @property
@@ -352,6 +378,11 @@ class IsLoggedInTest(unittest.TestCase):
         # 这是本次事故的放大器：错误页既没 /signout 也没验证码框，
         # 旧逻辑会顺着「不在 /signin 页且验证码框消失」把它判成已登录。
         driver = FakeDriver(ERROR_522, url="https://v2ex.com/")
+        self.assertFalse(v2ex.is_logged_in(driver))
+
+    def test_challenge_page_is_not_logged_in(self):
+        # 挑战页同理：URL 正常、页面 45KB、没有验证码框 —— 判成「已登录」就会一路错下去。
+        driver = FakeDriver(CHALLENGE_PAGE, url="https://v2ex.com/")
         self.assertFalse(v2ex.is_logged_in(driver))
 
     def test_home_with_signout_is_logged_in(self):
@@ -386,6 +417,26 @@ class ClaimValueTest(unittest.TestCase):
     def test_amount(self):
         self.assertEqual("4", v2ex.claim_amount("领取 4 铜币"))
         self.assertEqual("12", v2ex.claim_amount("Claim 12 coins"))
+
+
+class SiteSwitchTest(unittest.TestCase):
+    """切域名必须整组切：PB3_SESSION 是 host-only，登录页和领奖页不同域就等于没登录。"""
+
+    def test_use_site_keeps_same_domain(self):
+        original = v2ex.BASE_URL
+        try:
+            v2ex.use_site("https://v2ex.com/")
+            self.assertEqual("https://v2ex.com/signin", v2ex.SIGNIN_URL)
+            self.assertEqual("https://v2ex.com/", v2ex.HOME_URL)
+            self.assertEqual("https://v2ex.com/mission/daily", v2ex.MISSION_URL)
+            self.assertEqual("//v2ex.com", v2ex.HOME_HOST)
+            print("切换后:", v2ex.SIGNIN_URL, v2ex.HOME_URL, v2ex.MISSION_URL)
+        finally:
+            v2ex.use_site(original)
+
+    def test_default_site_avoids_cloudflare(self):
+        # 主站被挑战页挡着，默认不能再回到 v2ex.com
+        self.assertNotIn("//v2ex.com", v2ex.site_candidates()[0])
 
 
 if __name__ == "__main__":

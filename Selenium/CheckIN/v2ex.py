@@ -32,15 +32,29 @@ v2ex.com/mission/daily 会被踢回登录页 —— 所以 SIGNIN_URL 默认指�
          session cookie 已经落进 driver 了，任务页不经过首页也能领；
        · 「是否已登录」的最终判据挪到任务页（被踢回 /signin 才算没登录）。
 
+  5. 域名与 Cloudflare 挑战 —— 2026-11-06 起 v2ex.com 全站套了 Cloudflare 的托管挑战：
+     任何路径都返回「请稍候…」页（DOM 里带 window._cf_chl_opt），无头 Chrome 过不去，
+     登录表单压根不出现。旧逻辑会傻等 15s 密码框超时，5 轮重试全部撞同一堵墙，
+     最后只报「登录失败：已尝试 5 次」—— 从 11-06 连挂到 11-16 都没人看得出原因。
+     现在：
+       · 默认站点改为 edge.v2ex.com（同一套后端，表单 action、sha256 字段名、
+         验证码图 <img id="captcha-image" src="/_captcha"> 完全一致，但没套挑战页）；
+       · 登录前先探测候选域名，撞上挑战页就换下一个（挑战页不会因为重试而消失，
+         所以这类失败直接换域，不浪费重试次数）；
+       · open_ready 认得挑战页并跳过退避重试。
+     ⚠️ PB3_SESSION 是 host-only cookie，登录 / 首页 / 领奖必须同一个域，
+     所以三个 URL 只能从 BASE_URL 派生，别各配各的。
+
 用法：
     python v2ex.py <用户名> <密码> [飞书机器人 webhook]
 
 签到结束后会往飞书推一张卡片（状态 + 账户余额）。不给第三个参数就不推。
 
 可选环境变量：
-    V2EX_SIGNIN_URL     登录页，默认 https://v2ex.com/signin（必须与签到页同域）
-    V2EX_HOME_URL       首页，默认 https://v2ex.com/
-    V2EX_MISSION_URL    签到页，默认 https://v2ex.com/mission/daily
+    V2EX_BASE_URL       站点根，默认 https://edge.v2ex.com（下面三个 URL 由它派生）
+    V2EX_SIGNIN_URL     登录页，默认 $V2EX_BASE_URL/signin（必须与签到页同域）
+    V2EX_HOME_URL       首页，默认 $V2EX_BASE_URL/
+    V2EX_MISSION_URL    签到页，默认 $V2EX_BASE_URL/mission/daily
 V2EX_MAX_ATTEMPTS   整页重来的次数，默认 5
 V2EX_VOTE_ROUNDS    单次登录内换图找一致结果的上限，默认 12
 V2EX_PAGE_TRIES     取同一个页面的最大次数（撞上错误页时退避重试），默认 3
@@ -56,9 +70,21 @@ import time
 from Selenium.base import *
 from Messaging.Feishu import Feishu_SendCardMsg
 
-SIGNIN_URL = os.getenv("V2EX_SIGNIN_URL", "https://v2ex.com/signin")
-HOME_URL = os.getenv("V2EX_HOME_URL", "https://v2ex.com/")
-MISSION_URL = os.getenv("V2EX_MISSION_URL", "https://v2ex.com/mission/daily")
+# V2EX 主站 2026-11-06 起套了 Cloudflare 托管挑战（见文件头第 5 条），无头 Chrome
+# 拿不到登录表单。edge.v2ex.com 是同一套后端、没套挑战，所以默认走它。
+DEFAULT_BASE_URL = "https://edge.v2ex.com"
+# 主站若哪天恢复可用，探测时按顺序回退。注意：回退是**成组**的，登录和领奖必须同域。
+FALLBACK_BASE_URLS = ("https://v2ex.com",)
+
+
+def _norm_base(url):
+    return (url or "").strip().rstrip("/")
+
+
+BASE_URL = _norm_base(os.getenv("V2EX_BASE_URL", DEFAULT_BASE_URL))
+SIGNIN_URL = os.getenv("V2EX_SIGNIN_URL") or BASE_URL + "/signin"
+HOME_URL = os.getenv("V2EX_HOME_URL") or BASE_URL + "/"
+MISSION_URL = os.getenv("V2EX_MISSION_URL") or BASE_URL + "/mission/daily"
 MAX_ATTEMPTS = int(os.getenv("V2EX_MAX_ATTEMPTS", "5"))
 VOTE_ROUNDS = int(os.getenv("V2EX_VOTE_ROUNDS", "12"))
 PAGE_TRIES = int(os.getenv("V2EX_PAGE_TRIES", "3"))
@@ -68,6 +94,36 @@ PAGE_BACKOFF = (5, 15)
 # 用来判断「导航是否真的落到首页了」。必须带上 "//"，否则 `v2ex.com` 会
 # 在 edge.v2ex.com 的 URL 里也命中，等于没判断。
 HOME_HOST = "//" + HOME_URL.split("://", 1)[-1].split("/", 1)[0]
+
+
+def site_candidates():
+    """本次可尝试的站点根，按优先级排列。
+
+    显式配了 V2EX_SIGNIN_URL 的说明调用方要接管域名，就不再自作主张探测。
+    """
+    if os.getenv("V2EX_SIGNIN_URL"):
+        return [BASE_URL]
+    candidates = []
+    for base in (BASE_URL,) + FALLBACK_BASE_URLS:
+        base = _norm_base(base)
+        if base and base not in candidates:
+            candidates.append(base)
+    return candidates
+
+
+def use_site(base):
+    """切换整套站点 URL。
+
+    PB3_SESSION 是 host-only cookie，登录页和领奖页不同域就等于没登录 ——
+    所以只能三件一起换，不能只换其中一个。
+    """
+    global BASE_URL, SIGNIN_URL, HOME_URL, MISSION_URL, HOME_HOST
+    BASE_URL = _norm_base(base)
+    SIGNIN_URL = BASE_URL + "/signin"
+    HOME_URL = BASE_URL + "/"
+    MISSION_URL = BASE_URL + "/mission/daily"
+    HOME_HOST = "//" + HOME_URL.split("://", 1)[-1].split("/", 1)[0]
+
 
 # 首页侧栏的领奖入口指向 /mission/daily —— 用 href 匹配，与界面语言无关
 CLAIM_ENTRY_XPATHS = ("//a[contains(@href,'/mission/daily')]",)
@@ -176,6 +232,36 @@ ERROR_PAGE_HINTS = (
 )
 
 
+# Cloudflare 托管挑战页（中文标题「请稍候…」，英文 "Just a moment..."）的特征。
+# 它跟 502/522 不是一类：挑战页是站点主动设的门，重试永远不会过，只能换域名。
+# 不带这一类特征时，失败现场只剩一句「等 15 秒没找到密码框」，等于没线索。
+CHALLENGE_HINTS = (
+    "window._cf_chl_opt",
+    "challenge-platform/cdn-cgi/challenge",
+    "just a moment",
+    "请稍候",
+    "verify you are human",
+)
+CHALLENGE_TAG = "命中 Cloudflare 挑战页特征"
+
+
+def challenge_hint(source):
+    """判断页面是不是 Cloudflare 挑战页，返回命中描述；正常页返回 ""。"""
+    low = (source or "").lower()
+    for hint in CHALLENGE_HINTS:
+        if hint in low:
+            return "%s: %r" % (CHALLENGE_TAG, hint)
+    return ""
+
+
+def page_source(driver):
+    """安全取页面源码，读不到就返回空串。"""
+    try:
+        return driver.page_source or ""
+    except WebDriverException:
+        return ""
+
+
 def error_hint(driver=None, source=None):
     """判断当前页是不是站点/网关错误页，返回命中的特征描述；正常页返回 ""。
 
@@ -192,6 +278,11 @@ def error_hint(driver=None, source=None):
             return "page_source 读取失败: %s" % err
 
     low = source.lower()
+    # 挑战页排在最前：它同样「没有登出链接、没有报错文案」，被当成普通页会得出
+    # 「已登录」或「页面结构变了」的错误结论。
+    blocked = challenge_hint(source)
+    if blocked:
+        return blocked
     for hint in ERROR_PAGE_HINTS:
         if hint in low:
             return "命中错误页特征: %r" % hint
@@ -233,9 +324,45 @@ def open_ready(driver, url, needle, tries=PAGE_TRIES, timeout=20):
         if not hint:
             return ""
         print("===> 第 %d/%d 次打开 %s 拿到错误页: %s" % (no, tries, url, hint))
+        # 挑战页是站点设的门，重试不会变；别把 45s 的站点抽风退避浪费在它身上
+        if hint.startswith(CHALLENGE_TAG):
+            return hint
         if no < tries:
             time.sleep(PAGE_BACKOFF[min(no - 1, len(PAGE_BACKOFF) - 1)])
     return hint
+
+
+def select_site(driver):
+    """挑一个没被 Cloudflare 挑战页挡住的站点根，返回选中的根；全挂返回 ""。
+
+    挑战页是**整站**生效的（v2ex.com 连首页都返回「请稍候…」），所以只探登录页
+    就够，不用逐个路径试。选中后 use_site() 把三个 URL 一起切过去。
+    """
+    for base in site_candidates():
+        url = base + "/signin"
+        try:
+            driver.get(url)
+        except WebDriverException as err:
+            print("[WARN] 打开 %s 失败: %s" % (url, err))
+            continue
+        if not wait_url(driver, "/signin", 20):
+            print("===> %s 未落到登录页，跳过" % base)
+            continue
+        # Cloudflare 的托管挑战可能是 non-interactive 的：JS 跑完自己就跳走了。
+        # 给它 8 秒宽限再判定，别把「马上就能过」误判成「被挡死」。
+        blocked = ""
+        for _ in range(4):
+            time.sleep(2)
+            blocked = challenge_hint(page_source(driver))
+            if not blocked:
+                break
+        if blocked:
+            print("===> %s 被 Cloudflare 挡住（%s），换下一个候选域名" % (base, blocked))
+            continue
+        use_site(base)
+        print("===> 本次使用站点: %s" % BASE_URL)
+        return base
+    return ""
 
 
 def is_logged_in(driver):
@@ -284,6 +411,21 @@ def fill_credentials(driver, username, password, timeout=15):
 def login_once(driver, username, password, attempt=1):
     """走一遍登录流程，返回是否成功。失败时留存现场。"""
     driver.get(SIGNIN_URL)
+    # 挑战页上永远等不到密码框：先认出来，报一句能读懂的话，
+    # 别让「等 15 秒没找到密码框」背这个锅（那正是这次连挂 11 天的表现）。
+    wait_url(driver, "/signin", 20)
+    time.sleep(1)
+    blocked = challenge_hint(page_source(driver))
+    if blocked:
+        dump_debug(
+            driver,
+            "a%d_cloudflare" % attempt,
+            notes=[blocked, "站点被 Cloudflare 挑战页挡住，登录表单不会出现"],
+            secrets=(username, password),
+        )
+        raise RuntimeError(
+            "%s 被 Cloudflare 挑战页挡住（%s），换域名而非重试" % (SIGNIN_URL, blocked)
+        )
     fill_credentials(driver, username, password)
 
     # 等验证码图就绪。V2EX 的图是异步刷出来的，截早了会拿到空白。
@@ -598,6 +740,17 @@ def v2ex(username, password, bot_id=""):
     balance = None
     driver = get_web_driver()
     try:
+        # 先定域名：撞上 Cloudflare 挑战就整组切走，别拿 5 次重试去撞同一堵墙
+        if not select_site(driver):
+            candidates = "、".join(site_candidates())
+            dump_debug(
+                driver,
+                "no_reachable_site",
+                notes=["候选站点全部被挡住: %s" % candidates],
+                secrets=(username, password),
+            )
+            raise RuntimeError("候选站点全部被 Cloudflare 挑战页挡住：%s" % candidates)
+
         logged = False
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
