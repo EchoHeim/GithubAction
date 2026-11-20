@@ -1,6 +1,12 @@
 # -*- coding: UTF-8 -*-
 """NS中文网（www.ns211.com）自动签到。
 
+⚠️ 2026-11-20：**站点已取消签到功能**，本脚本在 workflow 里已置 `if: false` 停用。
+   证据：首页滚动公告「另外已经全站免费下载，签到功能取消」；
+   签到页 https://www.ns211.com/7404.html 返回 404。
+   登录链路本身仍正常（点 .login-btn 仍能弹出 SweetAlert2 表单），所以不是脚本坏了。
+   看到这段说明站点又开了签到，把 workflow 里两处 `if: false` 换回注释里的原条件即可。
+
 站点是 WordPress + ripro 主题，登录与签到**都是 admin-ajax.php 的 POST**，没有图形验证码
 （页面里 `caozhuti.tencent_captcha.is` 为空 → 前端不会拉起腾讯验证码）。
 所以这里只用 Selenium 点真实 UI，不做OCR / 不带 Cookie。
