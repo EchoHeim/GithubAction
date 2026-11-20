@@ -8,7 +8,6 @@ CI 上凭据来自 GitHub Secrets，以命令行参数传给签到脚本；本�
     python Selenium/CheckIN/run_local.py            # 默认跑聚宽（定时任务用的就是这条）
     python Selenium/CheckIN/run_local.py 52pojie    # 跑吾爱破解
     python Selenium/CheckIN/run_local.py juejin     # 跑掘金
-    python Selenium/CheckIN/run_local.py ns211      # 跑 NS中文网签到
 
 不带参数时行为与历史版本完全一致（聚宽 + joinquant-YYYY-MM-DD.log），
 计划任务 JoinQuantCheckIn 不受影响。
@@ -50,15 +49,6 @@ SITES = {
         "required": (("JUEJIN_USERNAME", "JUEJIN_PASSWORD"), ("JUEJIN_COOKIE",)),
         "log": "juejin",
         "title": "掘金签到",
-    },
-    "ns211": {
-        # NS中文网：WordPress + ripro，无验证码，走账号密码。
-        # Secret 叫 NS211_SECRET，PASSWORD 那套拼写也认（防改名不同步）。
-        "module": "Selenium.CheckIN.ns211",
-        "args": (),
-        "required": (("NS211_USERNAME", "NS211_SECRET"), ("NS211_USERNAME", "NS211_PASSWORD")),
-        "log": "ns211",
-        "title": "NS中文网签到",
     },
 }
 DEFAULT_SITE = "joinquant"

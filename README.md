@@ -26,8 +26,8 @@ Weather/               wttr.in 取天气 + 邮件发送
 
 工作流：`check_in.yml`（每天 22:22 UTC = 北京时间次日 6:22）
 
-目前 Actions 里跑的站点：**V2EX、52pojie、掘金、NS中文网**。
-也可以在 Actions 页手动触发时选站点（`all` / `v2ex` / `52pojie` / `juejin` / `ns211`）。
+目前 Actions 里跑的站点：**V2EX、52pojie、掘金**。
+也可以在 Actions 页手动触发时选站点（`all` / `v2ex` / `52pojie` / `juejin`）。
 
 各站点脚本在 [`Selenium/CheckIN/`](./Selenium/CheckIN/README.md)：
 
@@ -36,7 +36,6 @@ Weather/               wttr.in 取天气 + 邮件发送
 | `v2ex.py` | V2EX | 账号密码 + Cookie |
 | `52pojie.py` | 吾爱破解 | **只能 Cookie**，登录页有人机验证，账号密码过不去 |
 | `juejin.py` | 掘金 | 账号密码（自动过滑块），可选 Cookie 兜底 |
-| `ns211.py` | NS中文网 | 用户名 + 密码，Secret 名是 `NS211_SECRET` |
 | `aliyun.py` | 阿里云盘 | 账号密码，本地跑 |
 | `fishpi.py` | 摸鱼派 | 账号密码 |
 
