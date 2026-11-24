@@ -12,6 +12,7 @@ futu-debug/
 v2ex-debug/
 52pojie-debug/
 juejin-debug/
+xuexi-debug/
 
 # 已回帖记录（跨运行去重黑名单；本机跑会在工作区生成，CI 靠 actions/cache 存取）
 52pojie_reply_history.json

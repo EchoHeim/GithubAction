@@ -237,6 +237,81 @@ python -B Selenium/CheckIN/juejin_regress_test.py
 ```
 
 
+### 学习强国 Cookie 怎么取（**唯一的路**，2026-11-24 定稿）
+
+学习强国网页端**只有扫码登录**：`pc.xuexi.cn/points/login.html` 的 bundle 里只有 `qrcode`，
+文案写死「用学习强国扫码登录，如未安装扫码下载」，没有账号密码 / 短信 / 第三方授权入口。
+
+但登录态本身是个 cookie。前端只判断它**存不存在**：
+
+```js
+if (!Cookies.get("token")) return b(/* 跳 /points/login.html?ref=... */);
+```
+
+真正的校验在后端 —— 所以复用它就能免扫码。拿假 token 打积分接口，服务端原话是
+`401 {"message":"token check failed"}`，也就是说**只看 token 这一个值**，
+没有设备指纹、也没有「扫码会话」绑定。
+
+取法：
+
+1. Chrome 打开 <https://pc.xuexi.cn/points/my-points.html>，用手机「学习强国」App 扫码登录；
+2. F12 → **Application** → 左侧 Storage 树 → **Cookies** → 点 `https://pc.xuexi.cn`；
+3. 找到 **`token`**，双击 Value 全选复制。`token` **不是 HttpOnly**
+   （页面自己用 js-cookie 读它），所以这里抄得到；顺手把 `__UID__` 一起抄更稳
+   （没有也行，前端会自动生成一个存 365 天）；
+4. 更省事的取法：F12 → **Network** → 刷新页面 → 点 `my-points.html` 那条 **Document** 请求 →
+   Request Headers 里的 `cookie:` 整行 → 右键 **Copy value**。一次拿全，不用逐项挑。
+
+拼成环境变量（两种格式都认，脚本按「名字是不是 token/__UID__」判断，不靠 `=` 猜）：
+
+```ini
+XUEXI_COOKIE=token=xxxxxxxx; __UID__=yyyyyyyy
+# 或者只贴值，脚本自动补 token=
+XUEXI_COOKIE=xxxxxxxx
+```
+
+> ⚠️ **token 会过期**。过期后接口回 `401 {"message":"token check failed"}`，日志与飞书卡片
+> 会直接点名「Cookie 里的 token 已失效」，重抄一次即可。没有可靠的「能撑 N 天」数字，
+> 以接口 401 为准。
+> ⚠️ `tmzw`（登录时间戳）不用抄 —— 它只服务于前端那套 token 刷新检测，脚本不走这条路。
+
+跑起来：
+
+```bash
+# 本机（默认只验 token + 读积分，不开浏览器）
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/CheckIN/run_local.py xuexi
+```
+
+`.env.local` 里加 `XUEXI_BROWSER=1` 才会真开一次积分页（建立页面会话）。**默认不开**是有原因的：
+本机 Selenium Manager 联网取 chromedriver 会被安全策略直接杀进程（现象是 SIGTERM、无日志），
+连 `try/except` 都兜不住。CI 那边 chromedriver 由 `setup-chromedriver` 装好，所以 workflow 里
+显式置了 `XUEXI_BROWSER: "1"`。
+
+**这个脚本不刷分**。学习强国是**行为积分**（每日登录 1 分、阅读 1 分/篇、活跃时段翻倍……），
+脚本只做两件能如实汇报的事：验证 token 还活着、把今日/近期积分记下来。
+今日积分没涨是正常的 —— 卡片上那个数字是用来对账的，不是成绩单。
+
+接口备注（**2026-11-24 拿真实 token 全部实测过**，改代码前先看，省得白试）：
+
+| 用途 | 接口 | 说明 |
+|---|---|---|
+| 今日积分 | `GET .../delegate/score/today/query` | `data.score`，实测返回 `5.0` |
+| 今日进度 | `GET .../delegate/score/days/listScoreProgress?sence=score&deviceType=2` | `data.totalScore` 是**今日合计**（不是累计），`data.taskProgress[]` 各项含 `title/currentScore/dayMaxScore`，筛 `periodType=1`（每日）；**`sence` 是站点自己的拼写错误，照抄** |
+| 累计积分 | `POST .../delegate/score/detail/query` `{pageNo,pageSize}` | **没有总分接口**：取 `list[0].currentScore` —— 它是「该笔入账之后」的累计值，按时间倒序，第 1 条就是当前总分 |
+| 账号状态 | 同「今日进度」 | `inBlackList` / `needFaceRecognition` / `inAuthList`，任一为 true 就得先在卡片上说出来 |
+| 积分规则 | `GET .../delegate/score/scoreDescription?deviceType=2` | |
+
+2026-11-24 首次实测（lodge 的账号）：今日 5 分，累计 752 分，任务进度为
+`我要选读文章 1/12 ｜ 我要视听学习 1/12 ｜ 登录 1/1 ｜ 每日答题 0/5`
+
+> **「登录」1/1 是关键信号**：满了说明当天登录分已到账，脚本就不开浏览器了（省 30 秒）；
+> 没满且 `XUEXI_BROWSER=1` 才去开积分页，开完**立刻回查**登录分有没有 0→1 ——
+> 不拿「页面打开了」冒充「登录分拿到了」。
+
+> ⚠️ 积分接口全在 **`pc-proxy-api.xuexi.cn`**（前端 `examApiHost`）。
+> `pc-api.xuexi.cn` 是 `/open/api/auth/check`、`getGray` 用的，把积分路径拼到它上面
+> 一律返回 404「接口不存在」。
+
 ### 52pojie 的 Cookie 怎么取（**唯一的路**，2026-09-28 定稿）
 
 **别用账号密码**（脚本里这条路径已经删掉了）—— 登录页挂着 Cloudflare Turnstile

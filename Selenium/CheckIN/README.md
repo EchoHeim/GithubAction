@@ -5,6 +5,7 @@
 - muacloud.py 保存了[muacloud](https://muacloud.cloud/)网站自动签到脚本
 - gamekegs.py 保存了[gamekegs](https://gamekegs.com/)网站自动签到脚本
 - juejin.py 保存了[掘金](https://juejin.cn/)网站自动签到脚本
+- xuexi.py 保存了[学习强国](https://pc.xuexi.cn/points/my-points.html)网页端的签到（Cookie 复用登录态 + 积分快照）
 - 91.py保存了[91tvg](https://www.91tvg.com/)网站自动签到脚本
 
 ### 使用方法

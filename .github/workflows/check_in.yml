@@ -21,6 +21,7 @@ on:
           # 52pojie 已暂停（2026-10-21），选它会直接跳过、什么都不跑
           - 52pojie
           - juejin
+          - xuexi
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -149,6 +150,25 @@ jobs:
           CHECKIN_HEADLESS: "0"
         run: xvfb-run -a python -B -m Selenium.CheckIN.juejin
 
+      # 学习强国（qiangguo）：登录入口**只有扫码** —— login.html 的 bundle 里只有 qrcode，
+      # 文案写死「用学习强国扫码登录」，没有账号密码/短信/第三方。所以只能复用登录态。
+      # 但它的登录态就是个 cookie（token，domain=.xuexi.cn），而且前端只做**存在性判断**
+      # （`if (!Cookies.get("token")) -> /points/login.html`），真正的校验在后端 ——
+      # 拿假 token 打积分接口会回 401「token check failed」，说明只要 token 有效就是登录态。
+      # ⚠️ token 会过期：过期后接口回 401，卡片和日志里会直接点名「token 已失效」，
+      #    那时去浏览器重抄一次、更新 secret XUEXI_COOKIE 即可。
+      # 脚本不刷分（不模拟阅读/答题），只建立一次真实页面会话 + 把今日/近期积分记下来。
+      - name: Check in XueXi
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'xuexi') }}
+        timeout-minutes: 10
+        env:
+          XUEXI_COOKIE: ${{ secrets.XUEXI_COOKIE || vars.XUEXI_COOKIE }}
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
+          # 脚本默认不开浏览器（本机取 chromedriver 容易被安全策略杀进程）；
+          # CI 这边 chromedriver 由 setup-chromedriver 装好，所以显式打开这步。
+          XUEXI_BROWSER: "1"
+        run: python -B -m Selenium.CheckIN.xuexi
+
       - name: Upload 52pojie / JueJin diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -157,6 +177,7 @@ jobs:
           path: |
             52pojie-debug/
             juejin-debug/
+            xuexi-debug/
             52pojie_reply_history.json
           if-no-files-found: ignore
           retention-days: 7
