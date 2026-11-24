@@ -199,7 +199,12 @@ def read_today_score(session):
 def read_progress(session):
     """今日任务进度 + 账号健康状态。
 
-    实测响应（2026-11-24，deviceType=2）：
+    ⚠️ **deviceType=1（App 侧）才拿到全部 9 项**。deviceType=2（PC 侧）只回 4 项：
+    登录 / 我要选读文章 / 我要视听学习 / 每日答题，而订阅、发表观点、本地频道、
+    趣味答题、强国运动这 5 项 PC 端根本不列 —— 照着 PC 那份算「今天还差多少分」
+    会漏掉 14 分。所以这里固定用 1。
+
+    实测响应（2026-11-24）：
 
         {"userId":151170734596,"inBlackList":false,"needFaceRecognition":false,
          "totalScore":5,
@@ -212,7 +217,7 @@ def read_progress(session):
     ⚠️ 参数名是 `sence`（站点自己的拼写错误），照抄，改成 sense 会查不到。
     """
     data = call_api(
-        session, DAYS_PATH, params={"sence": "score", "deviceType": 2}, label="今日进度"
+        session, DAYS_PATH, params={"sence": "score", "deviceType": 1}, label="今日进度"
     )
     if not isinstance(data, dict):
         _dump("progress_unknown", data)
@@ -222,14 +227,15 @@ def read_progress(session):
     for row in data.get("taskProgress") or []:
         if not isinstance(row, dict):
             continue
-        # periodType=1 是「每日」任务。别的周期（每周一答/专题考试）对当天没意义，跳过
-        if row.get("periodType") not in (None, 1):
-            continue
+        # periodType=1 是「每日」，2 是「每周」（实测只有强国运动是 2）。
+        # 每周项也要显示 —— 但**不让它参与「今天还差多少」的计算**，
+        # 否则一周里剩下的六天都会把已领完的 2 分算成缺口。
         tasks.append(
             {
                 "title": row.get("title") or "?",
                 "score": _as_number(row.get("currentScore") or 0),
                 "max": _as_number(row.get("dayMaxScore") or 0),
+                "daily": row.get("periodType") in (None, 1),
             }
         )
 
@@ -314,7 +320,7 @@ def visit_points_page(cookie_header):
                 print("[WARN] 关闭浏览器失败: %s" % err)
 
 
-def notify(bot_id, status, today="", total="", progress="", account="", note=""):
+def notify(bot_id, status, today="", total="", progress="", gap="", account="", note=""):
     """推飞书卡片。推送失败只告警，绝不因此把签到判成失败。"""
     content = ["**签到状态**: %s" % status]
     content.append(
@@ -325,6 +331,8 @@ def notify(bot_id, status, today="", total="", progress="", account="", note="")
     )
     if progress:
         content.append("**今日进度**: %s" % progress)
+    if gap:
+        content.append("**今日缺口**: %s" % gap)
     if account:
         content.append("**账号状态**: %s" % account)
     if note:
@@ -368,7 +376,7 @@ def qiangguo(cookie="", bot_id=""):
     session = make_session(cookie)
     status = "签到失败"
     note = ""
-    today = total = progress = account = ""
+    today = total = progress = gap = account = ""
 
     try:
         # 先用接口验一次：token 失效就在 10 秒内说清楚，不用白等浏览器起停
@@ -380,7 +388,9 @@ def qiangguo(cookie="", bot_id=""):
         try:
             prog = read_progress(session)
             progress = " ｜ ".join(
-                "%s %s/%s" % (t["title"], t["score"], t["max"]) for t in prog["tasks"]
+                "%s %s/%s%s"
+                % (t["title"], t["score"], t["max"], "" if t["daily"] else "（周）")
+                for t in prog["tasks"]
             )
             print("===> 今日进度: %s" % (progress or "未读取到"))
         except Exception as err:
@@ -391,6 +401,15 @@ def qiangguo(cookie="", bot_id=""):
             print("===> 累计积分: %s" % total)
         except Exception as err:
             print("[WARN] 累计积分读取失败（不影响结论）: %s" % err)
+
+        # 今天还差多少 —— 「想拿满分该补哪几项」的入口，进度行已经写明差在哪
+        gap = ""
+        daily = [t for t in prog["tasks"] if t["daily"]]
+        if daily:
+            sum_max = sum(t["max"] for t in daily if isinstance(t["max"], (int, float)))
+            sum_now = sum(t["score"] for t in daily if isinstance(t["score"], (int, float)))
+            gap = "还差 %s 分（%s/%s，只算每日项）" % (sum_max - sum_now, sum_now, sum_max)
+            print("===> 今日缺口: %s" % gap)
 
         # 账号健康：真被风控了，上面所有数字都不可信，得先说出来
         account = "正常"
@@ -455,7 +474,7 @@ def qiangguo(cookie="", bot_id=""):
         raise
     finally:
         if bot_id:
-            notify(bot_id, status, today, total, progress, account, note)
+            notify(bot_id, status, today, total, progress, gap, account, note)
 
 
 if __name__ == "__main__":
