@@ -1,0 +1,49 @@
+name: 学习强国 · 今日阅读清单
+
+# 每天北京时间 13:00 推一份当日阅读清单到飞书。
+#
+# ⚠️ GitHub 的 cron 一律按 **UTC** 算：13:00 北京（UTC+8）= 05:00 UTC。
+#    直接抄 `0 13` 会变成北京时间 21:00，这是最容易踩的一脚。
+# ⚠️ 定时任务不是精确闹钟：GitHub 在整点高峰会排队，实际可能晚 5~15 分钟。
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 挑几篇
+        required: false
+        default: "10"
+      days:
+        description: 取最近几天
+        required: false
+        default: "3"
+
+jobs:
+  reading-list:
+    runs-on: ubuntu-latest
+    # 只拉两个 JSON + 发一张卡片，正常 20~40 秒。给 10 分钟纯粹是防 CDN 抽风。
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.10.*
+
+      # 这个任务**不需要** selenium / opencv / ddddocr —— 它不碰浏览器，
+      # 只发 HTTP 取列表、再发一张飞书卡片。所以别照抄 check_in.yml 的完整依赖，
+      # 那会让一个 30 秒的任务多花两三分钟装没用的包。
+      - name: Install requests
+        run: pip install requests==2.28.1
+
+      - name: Push today's reading list
+        env:
+          # 只读：拉公开列表 + 发卡片，不碰账号、不消耗积分
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
+          COUNT: ${{ inputs.count || '10' }}
+          DAYS: ${{ inputs.days || '3' }}
+        run: python -B Selenium/CheckIN/xuexi_reading_list.py "$COUNT" "$DAYS"

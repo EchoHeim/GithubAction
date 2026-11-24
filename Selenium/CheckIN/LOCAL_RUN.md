@@ -387,6 +387,14 @@ FEISHU_BOT_ID=https://open.feishu.cn/... python -B Selenium/CheckIN/xuexi_readin
 | 文章 | `https://www.xuexi.cn/lgdata/1crqb964p71.json` | 7050 条，42 个 channelNames |
 | 视听 | `https://www.xuexi.cn/lgdata/1novbsbi47k.json` | 4744 条 |
 
+**定时推送**：`.github/workflows/xuexi_reading.yml`，每天 **13:00 北京**（cron `0 5 * * *`，
+UTC 算的，写 `0 13` 会变成晚上 9 点）推一张卡片。这个 job **不需要** selenium/opencv/ddddocr，
+只装 `requests`，20~40 秒跑完。
+
+日更量很低（近 3 天只有 2 条），所以 `pick_with_widen()` 会**自动放宽窗口**：
+3 天不够就 6 天、12 天、30 天，日志里会明说「近 3 天不够 10 篇，已放宽到 6 天」。
+宁可放宽也要凑够一屏，不然日报只剩两条就没有意义了。
+
 > ⚠️ 这是**单一栏目的列表**，不是全站聚合：「头条新闻」一家占 6316/7050，
 > 所以清单的栏目多样性天生有限（实测近 7 天能凑到 5 个栏目）。
 > 首页那 16 个 `array-channel!*.json` 分片的真实基址没探到 ——

@@ -111,6 +111,21 @@ def pick(items, count, days):
     return picked
 
 
+def pick_with_widen(items, count, days):
+    """近 `days` 天不够 `count` 篇时自动放宽窗口，返回 (picked, 实际窗口)。
+
+    实测这份列表日更量很低（近 3 天只有 2 条），死守 3 天的话日报会只剩两条，
+    那就失去意义了。宁可放宽到一周，也要凑够一屏能看的量。
+    """
+    picked, window = [], days
+    for factor in (1, 2, 4, 10):
+        window = days * factor
+        picked = pick(items, count, window)
+        if len(picked) >= count:
+            return picked, window
+    return picked, window
+
+
 def render(picked, days):
     lines = [
         "===> 最近 %d 天共挑出 %d 篇（按栏目轮流取，不重复）" % (days, len(picked)),
@@ -131,9 +146,22 @@ def to_card(picked):
     return "\n".join(rows)
 
 
+def _int_arg(argv, index, default):
+    """取一个正整数参数；空串/非数字/0 都退回默认值。
+
+    workflow 里参数来自 `${{ inputs.count || '10' }}`，手工触发时留空会传空串 ——
+    直接 int('') 会甩一屏 traceback，而这里最合适的行为就是用默认值继续跑。
+    """
+    try:
+        value = int(str(argv[index]).strip())
+    except (IndexError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 def main():
-    count = int(sys.argv[1]) if len(sys.argv) > 1 else 10
-    days = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+    count = _int_arg(sys.argv, 1, 10)
+    days = _int_arg(sys.argv, 2, 3)
 
     print("===> 拉列表: %s" % ARTICLE_LIST)
     items = fetch_items(ARTICLE_LIST)
@@ -145,12 +173,16 @@ def main():
     except Exception as err:
         print("[WARN] 视听列表拉取失败（不影响文章清单）: %s" % err)
 
-    picked = pick(items, count, days)
+    picked, window = pick_with_widen(items, count, days)
     if not picked:
         print("[X] 近 %d 天没有可用条目 —— 把天数放大试试：%s %d 7" % (days, sys.argv[0], count))
         return 1
+    if window != days:
+        print(
+            "===> 近 %d 天不够 %d 篇，已放宽到 %d 天" % (days, count, window)
+        )
 
-    print(render(picked, days))
+    print(render(picked, window))
 
     bot_id = os.getenv("FEISHU_BOT_ID") or ""
     if bot_id:
