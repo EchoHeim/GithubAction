@@ -369,6 +369,33 @@ python -B Selenium/CheckIN/xuexi_page_test.py urls.txt   # 自己的清单：`�
 改过 `read_*` / `notify` / 分支逻辑后**务必重跑回归测试**，`deviceType` 传错这种错
 不会抛异常，只会让卡片少几行。
 
+#### 今日阅读清单（选文章，不代读）
+
+`xuexi_reading_list.py` 从站点自己的列表数据里按**栏目轮流**抽 N 篇，输出标题 + 链接，
+可选推飞书卡片（`lark_md` 链接可点）。
+
+```bash
+python -B Selenium/CheckIN/xuexi_reading_list.py        # 10 篇，近 3 天
+python -B Selenium/CheckIN/xuexi_reading_list.py 10 7   # 10 篇，近 7 天
+FEISHU_BOT_ID=https://open.feishu.cn/... python -B Selenium/CheckIN/xuexi_reading_list.py
+```
+
+数据源（都是站点首页自己在拉的静态 JSON，不需要登录态）：
+
+| 列表 | 地址 | 实测 |
+|---|---|---|
+| 文章 | `https://www.xuexi.cn/lgdata/1crqb964p71.json` | 7050 条，42 个 channelNames |
+| 视听 | `https://www.xuexi.cn/lgdata/1novbsbi47k.json` | 4744 条 |
+
+> ⚠️ 这是**单一栏目的列表**，不是全站聚合：「头条新闻」一家占 6316/7050，
+> 所以清单的栏目多样性天生有限（实测近 7 天能凑到 5 个栏目）。
+> 首页那 16 个 `array-channel!*.json` 分片的真实基址没探到 ——
+> `/lgdata/`、`bootcdn`、`source` 下全部 404，`boot-www` 连不上。
+> 要真正按频道铺开，下一步得从 SPA 的懒加载分片里找基址。
+>
+> ⚠️ 这个脚本**只选不读**：不打开页面、不模拟停留。篇数分按篇去重、时长分按正文页停留，
+> 脚本挂 30 秒 ×10 篇制造出来的是阅读记录，不是测试结果。
+
 > ⚠️ 积分接口全在 **`pc-proxy-api.xuexi.cn`**（前端 `examApiHost`）。
 > `pc-api.xuexi.cn` 是 `/open/api/auth/check`、`getGray` 用的，把积分路径拼到它上面
 > 一律返回 404「接口不存在」。
