@@ -144,3 +144,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# 学习强国本地阅读器产物
+xuexi-reading.html
