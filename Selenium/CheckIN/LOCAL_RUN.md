@@ -349,6 +349,26 @@ App（`deviceType=1`）有 9 项 —— **少的那 5 项一共 14 分只在 App
 > 没满且 `XUEXI_BROWSER=1` 才去开积分页，开完**立刻回查**登录分有没有 0→1 ——
 > 不拿「页面打开了」冒充「登录分拿到了」。
 
+#### 两个测试脚本（都离线/无副作用）
+
+| 脚本 | 测什么 | 要不要凭据 |
+|---|---|---|
+| `xuexi_regress_test.py` | 签到逻辑本身：Cookie 规整、接口错误分类、`deviceType=1` 口径、`totalScore` 语义、每周项不算缺口、卡片文案、四个分支决策。**19 组断言，不联网** | 不要 |
+| `xuexi_page_test.py` | 页面**打不打得开**：状态码、耗时、字节数、`<title>`、是否被 404/登录页顶替 | 可选（给了就带登录态） |
+
+```bash
+python -B Selenium/CheckIN/xuexi_regress_test.py
+python -B Selenium/CheckIN/xuexi_page_test.py            # 内置 5 个基线入口
+python -B Selenium/CheckIN/xuexi_page_test.py urls.txt   # 自己的清单：`说明 | url` 或裸 url
+```
+
+> ⚠️ `xuexi_page_test.py` **刻意不模拟停留**：单次 GET、不重试、不 sleep、不循环。
+> 一旦挂上 60 秒停留，它就从「可达性测试」变成「制造阅读记录」，那是另一回事。
+> 它也正好能回答那个悬着的问题 —— 同一批 URL 在**本机**和在**海外 IP 的 runner** 上差多少。
+
+改过 `read_*` / `notify` / 分支逻辑后**务必重跑回归测试**，`deviceType` 传错这种错
+不会抛异常，只会让卡片少几行。
+
 > ⚠️ 积分接口全在 **`pc-proxy-api.xuexi.cn`**（前端 `examApiHost`）。
 > `pc-api.xuexi.cn` 是 `/open/api/auth/check`、`getGray` 用的，把积分路径拼到它上面
 > 一律返回 404「接口不存在」。
