@@ -385,8 +385,10 @@ def qiangguo(cookie="", bot_id=""):
 
         # 进度/总分是卡片的血肉，但读不到不该拖垮签到本身（同 52pojie 读吾爱币的原则）
         prog = {"tasks": [], "in_blacklist": False, "need_face": False}
+        prog_ok = False
         try:
             prog = read_progress(session)
+            prog_ok = True
             progress = " ｜ ".join(
                 "%s %s/%s%s"
                 % (t["title"], t["score"], t["max"], "" if t["daily"] else "（周）")
@@ -425,7 +427,13 @@ def qiangguo(cookie="", bot_id=""):
         login_task = next((t for t in prog["tasks"] if "登录" in t["title"]), None)
         login_done = bool(login_task and login_task["score"] and login_task["score"] >= 1)
 
-        if login_done:
+        if not prog_ok:
+            # 进度接口挂了就**不能**说「登录分未到账」—— 那是把「读不到」当成「没拿到」，
+            # 卡片会变成假消息。这种情况只报「读不到」，让人去看日志。
+            status = "仅接口校验（进度读取失败）"
+            note = "今日进度接口没读成功，无法判断登录分是否到账"
+            print("[WARN] %s" % note)
+        elif login_done:
             status = "今日登录分已到账"
             print(
                 "===> 「登录」任务 %s/%s，今天的登录分已经拿到，不再开页面"
