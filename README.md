@@ -26,7 +26,7 @@ Weather/               wttr.in 取天气 + 邮件发送
 
 工作流：`check_in.yml`（每天 22:22 UTC = 北京时间次日 6:22）
 
-目前 Actions 里跑的站点：**V2EX、掘金、学习强国、致美化**（52pojie 暂停中）。
+目前 Actions 里跑的站点：**V2EX、掘金、致美化**（52pojie、学习强国已暂停）。
 也可以在 Actions 页手动触发时选站点（`all` / `v2ex` / `52pojie` / `juejin` / `xuexi` / `zhutix`）。
 
 各站点脚本在 [`Selenium/CheckIN/`](./Selenium/CheckIN/README.md)：
@@ -36,7 +36,7 @@ Weather/               wttr.in 取天气 + 邮件发送
 | `v2ex.py` | V2EX | 账号密码 + Cookie |
 | `52pojie.py` | 吾爱破解 | **只能 Cookie**，登录页有人机验证，账号密码过不去（已暂停） |
 | `juejin.py` | 掘金 | 账号密码（自动过滑块），可选 Cookie 兜底 |
-| `xuexi.py` | 学习强国 | **只能 Cookie**（只有扫码登录），复用 token |
+| `xuexi.py` | 学习强国 | **只能 Cookie**（只有扫码登录），复用 token（定时已暂停，手动可选） |
 | `zhutix.py` | 致美化 | **Cookie 里的 `b2_token`**（B2 主题 JWT），纯 HTTP 不开浏览器 |
 | `aliyun.py` | 阿里云盘 | 账号密码，本地跑 |
 | `fishpi.py` | 摸鱼派 | 账号密码 |

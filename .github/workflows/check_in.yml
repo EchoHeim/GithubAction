@@ -21,6 +21,7 @@ on:
           # 52pojie 已暂停（2026-10-21），选它会直接跳过、什么都不跑
           - 52pojie
           - juejin
+          # xuexi 的定时已停（2026-11-26，token 疑似过期），手动触发仍可选它
           - xuexi
           - zhutix
 
@@ -160,7 +161,13 @@ jobs:
       #    那时去浏览器重抄一次、更新 secret XUEXI_COOKIE 即可。
       # 脚本不刷分（不模拟阅读/答题），只建立一次真实页面会话 + 把今日/近期积分记下来。
       - name: Check in XueXi
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'xuexi') }}
+        # ===== 定时已停（2026-11-26）=====
+        # 2026-11-26 12:11 那次整个「网站签到」挂在 XueXi 这步，V2EX / 掘金都是 success，
+        # 大概率是 XUEXI_COOKIE 里的 token 过期。先把**自动跑**停掉，免得每天一红。
+        # 只停 schedule：手动触发仍可选 xuexi（或 all），换完 token 先手动验一次，再恢复定时。
+        # 要恢复定时，把这行 if 换回：
+        # if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'xuexi') }}
+        if: ${{ always() && github.event_name != 'schedule' && (inputs.site == 'all' || inputs.site == 'xuexi') }}
         timeout-minutes: 10
         env:
           XUEXI_COOKIE: ${{ secrets.XUEXI_COOKIE || vars.XUEXI_COOKIE }}
