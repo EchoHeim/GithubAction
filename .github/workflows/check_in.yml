@@ -22,6 +22,7 @@ on:
           - 52pojie
           - juejin
           - xuexi
+          - zhutix
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -169,6 +170,22 @@ jobs:
           XUEXI_BROWSER: "1"
         run: python -B -m Selenium.CheckIN.xuexi
 
+      # 致美化（zhutix.com）是 WordPress + B2 主题，签到走 B2 自家的 REST：
+      #   POST /wp-json/b2/v1/getTaskData   → 读任务列表（签到项的 finish/times 在这）
+      #   POST /wp-json/b2/v1/userMission   → 执行签到，无 body
+      # 认证就一条：cookie 里的 b2_token 当 JWT 塞进 Authorization 头（main.js 里写死的），
+      # 不需要 nonce、不需要过验证码。所以这步不碰浏览器，纯 requests，几秒就跑完 ——
+      # 也别给它配 xvfb，那是掘金/52pojie 才需要的。
+      # ⚠️ 站点公告过「签到功能暂时下线」。脚本会把这个情况单独认成
+      #    「站点已下线签到」并正常退出（退出码 0），不会天天把 job 标红。
+      - name: Check in Zhutix
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.site == 'all' || inputs.site == 'zhutix') }}
+        timeout-minutes: 5
+        env:
+          ZHUTIX_COOKIE: ${{ secrets.ZHUTIX_COOKIE || vars.ZHUTIX_COOKIE }}
+          FEISHU_BOT_ID: ${{ secrets.FEISHU_BOT_ID || vars.FEISHU_BOT_ID }}
+        run: python -B -m Selenium.CheckIN.zhutix
+
       - name: Upload 52pojie / JueJin diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -178,7 +195,7 @@ jobs:
             52pojie-debug/
             juejin-debug/
             xuexi-debug/
+            zhutix-debug/
             52pojie_reply_history.json
           if-no-files-found: ignore
           retention-days: 7
-

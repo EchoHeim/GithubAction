@@ -9,6 +9,7 @@ CI 上凭据来自 GitHub Secrets，以命令行参数传给签到脚本；本�
     python Selenium/CheckIN/run_local.py 52pojie    # 跑吾爱破解
     python Selenium/CheckIN/run_local.py juejin     # 跑掘金
     python Selenium/CheckIN/run_local.py xuexi      # 跑学习强国
+    python Selenium/CheckIN/run_local.py zhutix     # 跑致美化
 
 不带参数时行为与历史版本完全一致（聚宽 + joinquant-YYYY-MM-DD.log），
 计划任务 JoinQuantCheckIn 不受影响。
@@ -58,6 +59,15 @@ SITES = {
         "required": (("XUEXI_COOKIE",),),
         "log": "xuexi",
         "title": "学习强国签到",
+    },
+    "zhutix": {
+        # 致美化：WordPress + B2 主题，cookie 里的 b2_token 当 JWT 用。
+        # 纯 HTTP，不开浏览器，所以不需要 chromedriver，跑起来也就几秒。
+        "module": "Selenium.CheckIN.zhutix",
+        "args": (),
+        "required": (("ZHUTIX_COOKIE",),),
+        "log": "zhutix",
+        "title": "致美化签到",
     },
 }
 DEFAULT_SITE = "joinquant"

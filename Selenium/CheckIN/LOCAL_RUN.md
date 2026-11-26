@@ -408,6 +408,61 @@ UTC 算的，写 `0 13` 会变成晚上 9 点）推一张卡片。这个 job **�
 > `pc-api.xuexi.cn` 是 `/open/api/auth/check`、`getGray` 用的，把积分路径拼到它上面
 > 一律返回 404「接口不存在」。
 
+### 致美化 Cookie 怎么取（2026-11-26 定稿）
+
+```bash
+C:\Users\Lodge\.workbuddy\binaries\python\envs\checkin\Scripts\python.exe -B Selenium/CheckIN/run_local.py zhutix
+```
+
+**只需要一样东西：cookie 里的 `b2_token`。** 它是个 JWT（200+ 字符，两段点分隔），
+站点前端 `Assets/fontend/main.js` 里写死了这么用：
+
+```js
+const b2token = b2getCookie('b2_token')
+tp.defaults.headers.common['Authorization'] = 'Bearer ' + b2token
+```
+
+也就是说，**把这个 cookie 的值当 Bearer token 塞进请求头，就等于登录**——
+不需要 WP nonce，不做浏览器指纹，不用过验证码，甚至连 WordPress 的登录 cookie 都不用。
+
+取法：
+
+1. 浏览器登录 https://zhutix.com/ ，打开 https://zhutix.com/task/ ；
+2. F12 → **Application**（应用）→ 左侧 **Cookies** → `https://zhutix.com`；
+3. 找到 `b2_token`，复制它的 **Value**（整行 Cookie 一起复制也行，脚本会自己抠）；
+4. 填进 `.env.local` 的 `ZHUTIX_COOKIE=`（CI 里是 GitHub Secret 的同名项）。
+
+只贴值就行，脚本会用正则 `(?:^|;\s*)b2_token=([^;]+)` 从整行 cookie 里抠；
+贴了别的站点的 cookie 也会被点名拒绝，不会拿一串无关的 `wordpress_logged_in_*` 去瞎试。
+
+**脚本打的是 B2 的 REST，不是模拟点按钮**（接口从 `Assets/fontend/task.js` 里读出来的）：
+
+```
+POST https://zhutix.com/wp-json/b2/v1/getTaskData    # 任务列表，签到项的 finish/times 在这
+POST https://zhutix.com/wp-json/b2/v1/userMission    # 执行签到，无 body
+POST https://zhutix.com/wp-json/b2/v1/getUserMission # 连续天数 / 锋币（顺带读，读不到不影响）
+```
+
+前两个接口无凭据时都回同一句（实测）：
+
+```json
+{"code":"task_error","message":"请先登录","data":{"status":403}}
+```
+
+⚠️ 站点**不区分「没给 token」和「token 过期」**，都是「请先登录」。所以卡片只写
+「登录态不被接受」，具体是哪种得自己看 token 抄没抄全。
+
+**成功判据只有一个：回查 `getTaskData` 里签到项的 `finish` 涨没涨。** 接口返回 200 不算数——
+`task.js` 自己也是乐观地把 `finish` 直接写成 1，并没有真读服务端。
+
+**站点可能自己关掉签到。** `/task/` 页面长期挂着一行公告：
+
+> 签到和关注功能占用资源过大导致网站经常卡死，暂时下线，等待完善；
+> 临时补偿方案：评论任务提升到6次。
+
+脚本只在**签到被拒 + 公告仍在**这两个条件同时成立时，才判成「站点已下线签到」并**退出码 0**。
+单看公告不算——公告挂着但功能照常的站点太多了，拿它当唯一判据会把真失败洗成没事。
+
 ### 52pojie 的 Cookie 怎么取（**唯一的路**，2026-09-28 定稿）
 
 **别用账号密码**（脚本里这条路径已经删掉了）—— 登录页挂着 Cloudflare Turnstile

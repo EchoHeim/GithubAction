@@ -6,6 +6,7 @@
 - gamekegs.py 保存了[gamekegs](https://gamekegs.com/)网站自动签到脚本
 - juejin.py 保存了[掘金](https://juejin.cn/)网站自动签到脚本
 - xuexi.py 保存了[学习强国](https://pc.xuexi.cn/points/my-points.html)网页端的签到（Cookie 复用登录态 + 积分快照）
+- zhutix.py 保存了[致美化](https://zhutix.com/task/)任务中心的每日签到（B2 主题 REST 接口，Cookie 里的 b2_token 当 JWT 用，纯 HTTP 不开浏览器）
 - 91.py保存了[91tvg](https://www.91tvg.com/)网站自动签到脚本
 
 ### 使用方法
