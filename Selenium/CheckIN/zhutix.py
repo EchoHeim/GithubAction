@@ -273,6 +273,12 @@ def site_offline(session):
 
 def notify(bot_id, status, days="", credit="", progress="", note=""):
     """推飞书卡片。推送失败只告警，绝不因此改签到结论。"""
+    if not bot_id:
+        # 显式说出来。静默不推最容易被当成「配了但没收到」，
+        # 排查时又要从头翻 workflow 的 env —— 一行日志省半小时。
+        print("[WARN] 没配 FEISHU_BOT_ID，跳过飞书推送（签到结论不受影响）")
+        return
+
     content = ["**签到状态**: %s" % status]
     if days not in ("", None):
         content.append("**连续签到**: %s 天" % days)
@@ -285,9 +291,10 @@ def notify(bot_id, status, days="", credit="", progress="", note=""):
     content.append("**时间**: %s" % time.strftime("%Y-%m-%d %H:%M:%S"))
 
     try:
-        Feishu_SendCardMsg(bot_id, " 致美化 签到 ", "\n".join(content))
+        sent = Feishu_SendCardMsg(bot_id, " 致美化 签到 ", "\n".join(content))
+        print("===> 飞书卡片已推送" if sent else "===> [WARN] 飞书卡片没发出去，原因见上一行")
     except Exception as err:
-        print("[WARN] 飞书推送失败（不影响签到结果）: %s" % err)
+        print("[WARN] 飞书推送异常（不影响签到结果）: %s" % err)
 
 
 def resolve_credentials(argv):
@@ -391,8 +398,8 @@ def zhutix(cookie="", bot_id=""):
         note = str(err)[:200]
         raise
     finally:
-        if bot_id:
-            notify(bot_id, status, days, credit, progress, note)
+        # 无条件调用：没配机器人时由 notify 自己喊一声，别让「静默不推」看起来像「推了没收到」
+        notify(bot_id, status, days, credit, progress, note)
 
     if not ok:
         sys.exit("[X] 签到没通过：%s" % status)
