@@ -248,6 +248,33 @@ def read_summary(session):
     }
 
 
+def confirm_signed(session, before, tries=4):
+    """回查签到项，任意一次看到 finish 涨了就算过，返回 (finish, times)。
+
+    ⚠️ 为什么要重试：B2 有对象缓存，`userMission` 写完之后 `getTaskData` 未必立刻读得到新值。
+    2026-11-27 CI 首跑就栽在这儿 —— 签到其实加上了（锋币 2→3、任务 1/1），
+    但只等 1.5 秒回查，读到的还是旧值 0/1，被判「签到未生效」，整个 job 标红。
+    本地复现不出来，因为本机请求走的是另一条缓存路径。
+    间隔 2/4/6 秒递增，总共不到 15 秒；拿这个换一个不冤枉人的结论，很划算。
+    """
+    finish = before
+    times = 1
+    time.sleep(1.5)  # 先给站点一点落库时间，别一上来就催
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(2 * attempt)
+        data = call_api(session, "getTaskData", "回查任务列表")
+        _, item = find_mission(data)
+        if not item:
+            continue
+        finish = as_int(item.get("finish"))
+        times = as_int(item.get("times"), 1) or 1
+        print("===> 回查第 %d 次: %d/%d" % (attempt + 1, finish, times))
+        if finish > before or finish >= times:
+            return finish, times
+    return finish, times
+
+
 def site_offline(session):
     """检查 /task/ 页面上那行「签到…下线」公告还在不在。
 
@@ -346,22 +373,23 @@ def zhutix(cookie="", bot_id=""):
                 print("===> 已经签过了，不再重复调用")
             else:
                 print("===> 调 userMission 签到")
+                mission_raw = ""
                 try:
-                    _dump("userMission_ok", call_api(session, "userMission", "签到"))
+                    body = call_api(session, "userMission", "签到")
+                    _dump("userMission_ok", body)
+                    mission_raw = json.dumps(body, ensure_ascii=False)[:120]
+                    print("===> userMission 返回: %s" % mission_raw)
                 except AuthError:
                     raise
                 except RuntimeError as err:
                     # 接口报错也可能只是「今天签过了」。B2 的文案不固定，不猜 ——
-                    # 一律靠下面那次回查定性，这里只留痕。
+                    # 一律靠下面的回查定性，这里只留痕。
+                    mission_raw = "调用报错：%s" % str(err)[:100]
                     print("[WARN] 签到调用报错，等回查定论: %s" % err)
 
                 # ⚠️ 唯一的成功判据：回查 finish 涨没涨。接口返回 200 不算数。
-                time.sleep(1.5)
-                after = call_api(session, "getTaskData", "回查任务列表")
-                _, item2 = find_mission(after)
-                finish2 = as_int(item2.get("finish")) if item2 else finish
-                times2 = (as_int(item2.get("times"), 1) or 1) if item2 else times
-                print("===> 回查签到项: %d/%d" % (finish2, times2))
+                #    但回查要重试 —— 单次回查撞上 B2 的对象缓存，会把「签上了」判成「没生效」。
+                finish2, times2 = confirm_signed(session, finish)
 
                 if finish2 > finish or finish2 >= times2:
                     status = "签到成功（%d/%d）" % (finish2, times2)
@@ -374,6 +402,9 @@ def zhutix(cookie="", bot_id=""):
                     print("[WARN] %s" % note)
                 else:
                     status = "签到未生效（仍 %d/%d）" % (finish2, times2)
+                    # 把证据塞进卡片。下次再红，「接口压根没成功」和「成功了但回查读不到」
+                    # 一眼就能分开 —— 这两种要修的地方完全不同。
+                    note = "userMission 返回：%s" % (mission_raw or "无")
 
         try:
             summary = read_summary(session)

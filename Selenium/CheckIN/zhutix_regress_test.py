@@ -77,7 +77,8 @@ class FakeAPI(object):
                 raise m.AuthError("读取任务列表 拒绝：请先登录（HTTP 403）")
             if not self.tasks_seq:
                 raise AssertionError("getTaskData 被调用次数超过了预设序列")
-            return self.tasks_seq.pop(0)
+            # 回查会重试多次：只剩最后一个时重复它，模拟「一直读到同一个旧值」
+            return self.tasks_seq.pop(0) if len(self.tasks_seq) > 1 else self.tasks_seq[0]
         if action == "userMission":
             if self.mission_error:
                 raise self.mission_error
